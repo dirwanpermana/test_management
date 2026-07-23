@@ -1,0 +1,14 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: tcm
+    ports:
+      - "5432:5432"
+    volumes:
+      - tcm_pg_data:/var/lib/postgresql/data
+
+volumes:
+  tcm_pg_data:
