@@ -10,6 +10,7 @@ testCaseRouter.use(authenticate);
 
 const headerSchema = z.object({
   namaTestCase: z.string().min(1),
+  sprint: z.string().optional(),
   jiraUrl: z.string().url().optional().or(z.literal('')),
   namaMenu: z.string().min(1),
 });
@@ -25,18 +26,24 @@ testCaseRouter.post('/test-case-headers', requireRole('QA'), asyncHandler(async 
   return res.status(201).json(header);
 }));
 
+testCaseRouter.delete('/test-case-headers/:id', requireRole('QA'), asyncHandler(async (req, res) => {
+  const deleted = await service.deleteHeader(paramStr(req.params.id));
+  if (!deleted) return res.status(404).json({ message: 'Test case header tidak ditemukan' });
+  return res.status(204).send();
+}));
+
 testCaseRouter.get('/test-case-items', asyncHandler(async (req, res) => {
   const headerId = typeof req.query.headerId === 'string' ? req.query.headerId : undefined;
   res.json(await service.listItems(headerId));
 }));
 
 const itemSchema = z.object({
-  featureName: z.string().min(1),
-  testType: z.enum(['Positive', 'Negative']),
-  scenario: z.string().min(1),
-  steps: z.string().min(1),
+  featureName: z.string().optional().default(''),
+  testType: z.enum(['Positive', 'Negative']).optional().default('Positive'),
+  scenario: z.string().optional().default(''),
+  steps: z.string().optional().default(''),
   testData: z.string().optional(),
-  expectedResult: z.string().min(1),
+  expectedResult: z.string().optional().default(''),
   status: z.enum(['Not Executed', 'Pass', 'Fail', 'Blocked', 'On Hold']).optional(),
   picQa: z.string().uuid().optional(),
   testDate: z.string().optional(),

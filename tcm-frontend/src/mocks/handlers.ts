@@ -1,9 +1,12 @@
 import { http, HttpResponse } from 'msw';
 import {
   users, credentials, findUser, testCaseHeaders, testCaseItems, bugs, bugComments,
-  bugStatusHistory, bugStatusTransitions, dailyCounters, nextSeq, todayCode,
+  bugStatusHistory, dailyCounters, nextSeq, todayCode,
 } from './seedData';
-import type { Role, TestCaseItem, Bug, BugStatus } from '../types/entities';
+import { allowedStatusesForRole } from '../constants/bugWorkflow';
+import type {
+  Role, TestCaseItem, TestCaseHeader, Bug, BugStatus,
+} from '../types/entities';
 
 const API = '/api';
 
@@ -41,6 +44,10 @@ function withBugNames(bug: Bug): Bug {
   };
 }
 
+function withHeaderNames(header: TestCaseHeader): TestCaseHeader {
+  return { ...header, createdByName: findUser(header.createdBy)?.fullName };
+}
+
 export const handlers = [
   // ---------------- AUTH ----------------
   http.post(`${API}/auth/login`, async ({ request }) => {
@@ -65,7 +72,7 @@ export const handlers = [
   // ---------------- TEST CASE HEADERS ----------------
   http.get(`${API}/test-case-headers`, ({ request }) => {
     if (!requireAuth(request)) return HttpResponse.json({ message: 'Unauthorized' }, { status: 401 });
-    return HttpResponse.json(testCaseHeaders);
+    return HttpResponse.json(testCaseHeaders.map(withHeaderNames));
   }),
 
   http.post(`${API}/test-case-headers`, async ({ request }) => {
@@ -73,18 +80,38 @@ export const handlers = [
     if (!auth) return HttpResponse.json({ message: 'Unauthorized' }, { status: 401 });
     if (auth.role !== 'QA') return HttpResponse.json({ message: 'Forbidden: hanya QA' }, { status: 403 });
 
-    const body = (await request.json()) as { namaTestCase: string; jiraUrl: string; namaMenu: string };
-    const header = {
+    const body = (await request.json()) as {
+      namaTestCase: string; sprint?: string; jiraUrl: string; namaMenu: string;
+    };
+    const now = new Date().toISOString();
+    const header: TestCaseHeader = {
       id: `h-${testCaseHeaders.length + 1}`,
       headerCode: todayCode(),
       namaTestCase: body.namaTestCase,
+      sprint: body.sprint,
       jiraUrl: body.jiraUrl,
       namaMenu: body.namaMenu,
       createdBy: auth.sub,
-      createdAt: new Date().toISOString(),
+      createdAt: now,
+      updatedAt: now,
     };
     testCaseHeaders.push(header);
-    return HttpResponse.json(header, { status: 201 });
+    return HttpResponse.json(withHeaderNames(header), { status: 201 });
+  }),
+
+  http.delete(`${API}/test-case-headers/:id`, ({ request, params }) => {
+    const auth = requireAuth(request);
+    if (!auth) return HttpResponse.json({ message: 'Unauthorized' }, { status: 401 });
+    if (auth.role !== 'QA') return HttpResponse.json({ message: 'Forbidden: hanya QA' }, { status: 403 });
+
+    const idx = testCaseHeaders.findIndex((h) => h.id === params.id);
+    if (idx === -1) return HttpResponse.json({ message: 'Not found' }, { status: 404 });
+    testCaseHeaders.splice(idx, 1);
+    // cascade delete semua item di bawah header ini
+    for (let i = testCaseItems.length - 1; i >= 0; i -= 1) {
+      if (testCaseItems[i].headerId === params.id) testCaseItems.splice(i, 1);
+    }
+    return new HttpResponse(null, { status: 204 });
   }),
 
   // ---------------- TEST CASE ITEMS ----------------
@@ -198,6 +225,8 @@ export const handlers = [
       expectedResult: body.expectedResult ?? '',
       actualResult: body.actualResult ?? '',
       status: 'Open',
+      severity: body.severity ?? 'Medium',
+      priority: body.priority ?? 'Medium',
       assignedTo: body.assignedTo,
       attachments: [],
       createdAt: now,
@@ -219,9 +248,7 @@ export const handlers = [
     if (!bug) return HttpResponse.json({ message: 'Not found' }, { status: 404 });
 
     const { status: toStatus } = (await request.json()) as { status: BugStatus };
-    const allowed = bugStatusTransitions.some(
-      (t) => t.from === bug.status && t.to === toStatus && t.role === auth.role,
-    );
+    const allowed = allowedStatusesForRole(auth.role).includes(toStatus);
     if (!allowed) {
       return HttpResponse.json(
         { message: `Transisi status '${bug.status}' -> '${toStatus}' tidak diizinkan untuk role ${auth.role}` },

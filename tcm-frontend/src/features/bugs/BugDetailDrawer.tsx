@@ -1,7 +1,7 @@
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { useAuth } from '../../auth/useAuth';
-import { RoleGuard } from '../../auth/RoleGuard';
 import { StatusBadge } from '../../components/ui/StatusBadge';
+import { allowedStatusesForRole } from '../../constants/bugWorkflow';
 import { useAddComment, useBugDetail, useChangeBugStatus } from './useBugs';
 import type { BugStatus } from '../../types/entities';
 
@@ -12,16 +12,13 @@ export function BugDetailDrawer({ bugId, onClose }: { bugId: string; onClose: ()
   const addComment = useAddComment();
   const [comment, setComment] = useState('');
   const [statusError, setStatusError] = useState<string | null>(null);
+  const [selectedStatus, setSelectedStatus] = useState<BugStatus | ''>('');
 
-  async function handleChangeStatus(status: BugStatus) {
-    setStatusError(null);
-    try {
-      await changeStatus.mutateAsync({ id: bugId, status });
-    } catch (err) {
-      const message = (err as { response?: { data?: { message?: string } } })?.response?.data?.message;
-      setStatusError(message ?? 'Gagal mengubah status');
-    }
-  }
+  // Sinkronkan pilihan dropdown dengan status terkini setiap kali data bug berubah
+  // (misal setelah berhasil disimpan, atau saat pertama kali dimuat).
+  useEffect(() => {
+    if (data) setSelectedStatus(data.bug.status);
+  }, [data]);
 
   async function handleAddComment(e: FormEvent) {
     e.preventDefault();
@@ -30,9 +27,22 @@ export function BugDetailDrawer({ bugId, onClose }: { bugId: string; onClose: ()
     setComment('');
   }
 
+  async function handleSaveStatus() {
+    if (!data || !selectedStatus || selectedStatus === data.bug.status) return;
+    setStatusError(null);
+    try {
+      await changeStatus.mutateAsync({ id: bugId, status: selectedStatus });
+    } catch (err) {
+      const message = (err as { response?: { data?: { message?: string } } })?.response?.data?.message;
+      setStatusError(message ?? 'Gagal mengubah status');
+    }
+  }
+
+  const statusOptions = allowedStatusesForRole(user?.role);
+
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="drawer-card" onClick={(e) => e.stopPropagation()}>
+      <div className="drawer-card drawer-card-wide" onClick={(e) => e.stopPropagation()}>
         <button className="drawer-close" onClick={onClose}>Tutup</button>
 
         {isLoading || !data ? (
@@ -40,9 +50,11 @@ export function BugDetailDrawer({ bugId, onClose }: { bugId: string; onClose: ()
         ) : (
           <>
             <h2>{data.bug.bugNo}</h2>
-            <StatusBadge status={data.bug.status} />
 
             <dl className="detail-list">
+              <dt>Status</dt><dd><StatusBadge status={data.bug.status} /></dd>
+              <dt>Severity</dt><dd><StatusBadge status={data.bug.severity} /></dd>
+              <dt>Priority</dt><dd><StatusBadge status={data.bug.priority} /></dd>
               <dt>Test Case</dt><dd>{data.bug.testCaseNo ?? '-'}</dd>
               <dt>Pembuat</dt><dd>{data.bug.reporterName}</dd>
               <dt>Assigned to</dt><dd>{data.bug.assignedToName ?? '-'}</dd>
@@ -52,28 +64,15 @@ export function BugDetailDrawer({ bugId, onClose }: { bugId: string; onClose: ()
               <dt>Actual Result</dt><dd>{data.bug.actualResult}</dd>
             </dl>
 
-            <div className="status-actions">
-              <RoleGuard allow={['DEV']}>
-                {data.bug.status === 'Open' && (
-                  <button onClick={() => handleChangeStatus('Ready to Test')}>Mark Ready to Test</button>
-                )}
-                {data.bug.status === 'Reopen' && (
-                  <button onClick={() => handleChangeStatus('Ready to Test')}>Mark Ready to Test (ulang)</button>
-                )}
-              </RoleGuard>
-              <RoleGuard allow={['QA']}>
-                {data.bug.status === 'Ready to Test' && (
-                  <>
-                    <button onClick={() => handleChangeStatus('Closed')}>Tandai Closed (lolos retest)</button>
-                    <button className="btn-secondary" onClick={() => handleChangeStatus('Reopen')}>Reopen (gagal retest)</button>
-                  </>
-                )}
-                {data.bug.status === 'Open' && (
-                  <button className="btn-secondary" onClick={() => handleChangeStatus('Rejected')}>Reject</button>
-                )}
-              </RoleGuard>
-            </div>
-            {statusError && <div className="error-text">{statusError}</div>}
+            <h3>Dokumen Pendukung</h3>
+            <ul className="attachment-list">
+              {data.bug.attachments.length === 0 && <li className="muted">Belum ada dokumen.</li>}
+              {data.bug.attachments.map((a) => (
+                <li key={a.id}>
+                  <a href={a.fileUrl} target="_blank" rel="noreferrer">{a.fileName}</a>
+                </li>
+              ))}
+            </ul>
 
             <h3>Komentar</h3>
             <div className="comment-list">
@@ -93,6 +92,31 @@ export function BugDetailDrawer({ bugId, onClose }: { bugId: string; onClose: ()
               />
               <button type="submit">Kirim</button>
             </form>
+
+            <div className="status-change-row">
+              <div className="status-change-label">
+                <h3>Ubah Status</h3>
+                {statusOptions.length === 0 && (
+                  <span className="muted">Role Anda tidak bisa mengubah status bug.</span>
+                )}
+              </div>
+              {statusOptions.length > 0 && (
+                <div className="status-change-controls">
+                  <select
+                    value={selectedStatus || data.bug.status}
+                    onChange={(e) => setSelectedStatus(e.target.value as BugStatus)}
+                  >
+                    {statusOptions.map((s) => (
+                      <option key={s} value={s}>{s}</option>
+                    ))}
+                  </select>
+                  <button onClick={handleSaveStatus} disabled={changeStatus.isPending}>
+                    {changeStatus.isPending ? 'Menyimpan...' : 'Simpan'}
+                  </button>
+                </div>
+              )}
+              {statusError && <div className="error-text">{statusError}</div>}
+            </div>
 
             <h3>Riwayat Status</h3>
             <ul className="history-list">

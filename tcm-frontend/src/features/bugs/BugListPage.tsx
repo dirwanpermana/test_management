@@ -32,8 +32,11 @@ export function BugListPage() {
                 <th>Test Case</th>
                 <th>Pembuat</th>
                 <th>Scenario</th>
+                <th>Severity</th>
+                <th>Priority</th>
                 <th>Status</th>
                 <th>Assign to</th>
+                <th>Create Date</th>
                 <th></th>
               </tr>
             </thead>
@@ -44,13 +47,16 @@ export function BugListPage() {
                   <td>{b.testCaseNo ?? '-'}</td>
                   <td>{b.reporterName}</td>
                   <td>{b.scenario}</td>
+                  <td><StatusBadge status={b.severity} /></td>
+                  <td><StatusBadge status={b.priority} /></td>
                   <td><StatusBadge status={b.status} /></td>
                   <td>{b.assignedToName ?? '-'}</td>
+                  <td>{new Date(b.createdAt).toLocaleString('id-ID')}</td>
                   <td><button className="btn-link" onClick={() => setActiveBugId(b.id)}>Detail</button></td>
                 </tr>
               ))}
               {bugs.length === 0 && (
-                <tr><td colSpan={7} className="muted">Belum ada bug tercatat.</td></tr>
+                <tr><td colSpan={10} className="muted">Belum ada bug tercatat.</td></tr>
               )}
             </tbody>
           </table>

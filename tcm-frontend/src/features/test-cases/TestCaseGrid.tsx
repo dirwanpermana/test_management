@@ -7,6 +7,13 @@ import type { TestCaseItem } from '../../types/entities';
 
 ModuleRegistry.registerModules([AllCommunityModule]);
 
+// Tema Excel-like: garis pembatas antar kolom & baris ditampilkan eksplisit.
+const gridTheme = themeQuartz.withParams({
+  columnBorder: true,
+  rowBorder: true,
+  wrapperBorder: true,
+});
+
 interface TestCaseGridProps {
   rows: TestCaseItem[];
   readOnly: boolean;
@@ -26,6 +33,18 @@ export function TestCaseGrid({ rows, readOnly, onCellChanged, onDelete }: TestCa
         width: 120,
         cellEditor: 'agSelectCellEditor',
         cellEditorParams: { values: ['Positive', 'Negative'] },
+        // PENTING: cellRenderer harus mengembalikan DOM element, bukan string HTML —
+        // ag-Grid menganggap string sebagai teks polos (di-escape), jadi tag <span>
+        // yang dikembalikan sebagai string akan tampil literal, bukan ter-render.
+        cellRenderer: (params: { value?: string }) => {
+          const span = document.createElement('span');
+          if (params.value) {
+            span.textContent = params.value;
+            span.style.color = params.value === 'Negative' ? '#dc2626' : '#16a34a';
+            span.style.fontWeight = '600';
+          }
+          return span;
+        },
       },
       { field: 'scenario', headerName: 'Scenario', editable: !readOnly, flex: 2, minWidth: 200 },
       { field: 'steps', headerName: 'Steps', editable: !readOnly, flex: 2, minWidth: 200 },
@@ -48,8 +67,14 @@ export function TestCaseGrid({ rows, readOnly, onCellChanged, onDelete }: TestCa
     if (!readOnly) {
       base.push({
         headerName: '',
-        width: 90,
-        cellRenderer: () => '<button class="grid-delete-btn">Hapus</button>',
+        width: 100,
+        cellRenderer: () => {
+          const button = document.createElement('button');
+          button.type = 'button';
+          button.className = 'grid-delete-btn';
+          button.textContent = 'Hapus';
+          return button;
+        },
         onCellClicked: (event) => onDelete(event.data as TestCaseItem),
       });
     }
@@ -61,9 +86,9 @@ export function TestCaseGrid({ rows, readOnly, onCellChanged, onDelete }: TestCa
   }
 
   return (
-    <div style={{ height: 520, width: '100%' }}>
+    <div className="test-case-grid-wrapper">
       <AgGridReact<TestCaseItem>
-        theme={themeQuartz}
+        theme={gridTheme}
         rowData={rows}
         columnDefs={columnDefs}
         onCellValueChanged={handleCellValueChanged}

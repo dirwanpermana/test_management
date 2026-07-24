@@ -45,3 +45,14 @@ export function useAddComment() {
     onSuccess: (_data, variables) => qc.invalidateQueries({ queryKey: ['bugs', variables.id] }),
   });
 }
+
+export function useUploadAttachment() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ bugId, file }: { bugId: string; file: File }) => api.uploadAttachment(bugId, file),
+    onSuccess: (_data, variables) => {
+      qc.invalidateQueries({ queryKey: ['bugs', variables.bugId] });
+      qc.invalidateQueries({ queryKey: ['bugs'] });
+    },
+  });
+}

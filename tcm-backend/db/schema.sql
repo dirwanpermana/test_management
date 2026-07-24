@@ -35,6 +35,7 @@ CREATE TABLE IF NOT EXISTS test_case_headers (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     header_code     CHAR(6) NOT NULL,
     nama_test_case  VARCHAR(255) NOT NULL,
+    sprint          VARCHAR(50),
     jira_url        VARCHAR(500),
     nama_menu       VARCHAR(255) NOT NULL,
     created_by      UUID NOT NULL REFERENCES users(id),
@@ -122,14 +123,21 @@ CREATE TABLE IF NOT EXISTS bug_daily_counter (
 CREATE TABLE IF NOT EXISTS bugs (
     id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     bug_no              VARCHAR(14) UNIQUE,
-    test_case_item_id   UUID REFERENCES test_case_items(id),
+    test_case_item_id   UUID REFERENCES test_case_items(id) ON DELETE SET NULL,
     reporter_id         UUID NOT NULL REFERENCES users(id),
     scenario            TEXT NOT NULL,
     steps_to_reproduce  TEXT NOT NULL,
     expected_result     TEXT NOT NULL,
     actual_result       TEXT NOT NULL,
     status              VARCHAR(20) NOT NULL DEFAULT 'Open'
-                          CHECK (status IN ('Open','Ready to Test','Reopen','Closed','Rejected')),
+                          CHECK (status IN (
+                            'Open', 'On Progress Dev', 'Ready to Test', 'On Progress QA',
+                            'Reopen', 'Close', 'Take Out', 'Hold'
+                          )),
+    severity            VARCHAR(10) NOT NULL DEFAULT 'Medium'
+                          CHECK (severity IN ('Critical','Major','Medium','Low')),
+    priority            VARCHAR(10) NOT NULL DEFAULT 'Medium'
+                          CHECK (priority IN ('Critical','High','Medium','Low')),
     assigned_to         UUID REFERENCES users(id),
     updated_by          UUID REFERENCES users(id),
     created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -219,11 +227,16 @@ CREATE TABLE IF NOT EXISTS bug_status_transitions (
 );
 
 INSERT INTO bug_status_transitions (from_status, to_status, allowed_role) VALUES
-    ('Open', 'Ready to Test', 'DEV'),
-    ('Ready to Test', 'Reopen', 'QA'),
-    ('Ready to Test', 'Closed', 'QA'),
-    ('Reopen', 'Ready to Test', 'DEV'),
-    ('Open', 'Rejected', 'QA')
+    ('Open',             'On Progress Dev', 'DEV'),
+    ('Open',             'Hold',            'QA'),
+    ('Open',             'Take Out',        'QA'),
+    ('On Progress Dev',  'Ready to Test',   'DEV'),
+    ('On Progress Dev',  'Hold',            'DEV'),
+    ('Ready to Test',    'On Progress QA',  'QA'),
+    ('On Progress QA',   'Close',           'QA'),
+    ('On Progress QA',   'Reopen',          'QA'),
+    ('Reopen',           'On Progress Dev', 'DEV'),
+    ('Hold',             'Open',            'QA')
 ON CONFLICT DO NOTHING;
 
 -- ---------- Attachments (generic) ----------

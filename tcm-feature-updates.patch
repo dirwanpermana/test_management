@@ -1,0 +1,1647 @@
+diff --git a/tcm-backend/.gitignore b/tcm-backend/.gitignore
+index 9c97bbd..8f10593 100644
+--- a/tcm-backend/.gitignore
++++ b/tcm-backend/.gitignore
+@@ -1,3 +1,4 @@
+ node_modules
+ dist
+ .env
++uploads/
+diff --git a/tcm-backend/db/migration_002_sprint_severity_priority.sql b/tcm-backend/db/migration_002_sprint_severity_priority.sql
+new file mode 100644
+index 0000000..58b3bf6
+--- /dev/null
++++ b/tcm-backend/db/migration_002_sprint_severity_priority.sql
+@@ -0,0 +1,74 @@
++-- ============================================================
++-- Migration 002 — Sprint field, Bug severity/priority, dan
++-- perluasan status bug (Open, On Progress Dev, Ready to Test,
++-- On Progress QA, Reopen, Close, Take Out, Hold).
++--
++-- Jalankan ini SEKALI terhadap database yang SUDAH ada datanya
++-- (schema.sql tidak akan meng-ALTER tabel yang sudah dibuat,
++-- karena semua CREATE TABLE di sana pakai IF NOT EXISTS).
++--
++-- Cara pakai:
++--   psql -U postgres -d tcm -f db/migration_002_sprint_severity_priority.sql
++-- ============================================================
++
++BEGIN;
++
++-- 1. Kolom Sprint di test_case_headers -------------------------------------
++ALTER TABLE test_case_headers ADD COLUMN IF NOT EXISTS sprint VARCHAR(50);
++
++-- 1b. Fix FK bugs.test_case_item_id — sebelumnya tanpa ON DELETE, jadi
++--     menghapus test_case_header (yang cascade ke test_case_items) akan
++--     gagal kalau ada bug yang tertaut. Sekarang bug tetap ada, hanya
++--     referensinya yang di-null-kan (testCaseNo di frontend akan tampil '-').
++ALTER TABLE bugs DROP CONSTRAINT IF EXISTS bugs_test_case_item_id_fkey;
++ALTER TABLE bugs ADD CONSTRAINT bugs_test_case_item_id_fkey
++  FOREIGN KEY (test_case_item_id) REFERENCES test_case_items(id) ON DELETE SET NULL;
++
++-- 2. Kolom Severity & Priority di bugs -------------------------------------
++ALTER TABLE bugs ADD COLUMN IF NOT EXISTS severity VARCHAR(10) NOT NULL DEFAULT 'Medium';
++ALTER TABLE bugs ADD COLUMN IF NOT EXISTS priority VARCHAR(10) NOT NULL DEFAULT 'Medium';
++
++DO $$ BEGIN
++  ALTER TABLE bugs ADD CONSTRAINT bugs_severity_check
++    CHECK (severity IN ('Critical','Major','Medium','Low'));
++EXCEPTION WHEN duplicate_object THEN NULL; END $$;
++
++DO $$ BEGIN
++  ALTER TABLE bugs ADD CONSTRAINT bugs_priority_check
++    CHECK (priority IN ('Critical','High','Medium','Low'));
++EXCEPTION WHEN duplicate_object THEN NULL; END $$;
++
++-- 3. Perluasan status bug ---------------------------------------------------
++-- Map data lama supaya tidak melanggar CHECK constraint baru:
++--   'Closed'   -> 'Close'    (nama status baru untuk kondisi yang sama)
++--   'Rejected' -> 'Take Out' (bug invalid/duplikat, ditarik dari daftar aktif)
++UPDATE bugs SET status = 'Close' WHERE status = 'Closed';
++UPDATE bugs SET status = 'Take Out' WHERE status = 'Rejected';
++
++ALTER TABLE bugs DROP CONSTRAINT IF EXISTS bugs_status_check;
++ALTER TABLE bugs ADD CONSTRAINT bugs_status_check
++  CHECK (status IN (
++    'Open', 'On Progress Dev', 'Ready to Test', 'On Progress QA',
++    'Reopen', 'Close', 'Take Out', 'Hold'
++  ));
++
++-- 4. Refresh matrix bug_status_transitions ---------------------------------
++-- ASUMSI alur (perlu dikonfirmasi ke stakeholder — sama seperti asumsi lain
++-- di rancangan-tcm-system.md):
++--   Open -> On Progress Dev (DEV) -> Ready to Test (DEV) -> On Progress QA (QA)
++--         -> Close (QA) / Reopen (QA) -> On Progress Dev (DEV, ulang)
++--   Open -> Hold / Take Out (QA); Hold -> Open (QA, lanjutkan lagi)
++TRUNCATE bug_status_transitions;
++INSERT INTO bug_status_transitions (from_status, to_status, allowed_role) VALUES
++    ('Open',             'On Progress Dev', 'DEV'),
++    ('Open',             'Hold',            'QA'),
++    ('Open',             'Take Out',        'QA'),
++    ('On Progress Dev',  'Ready to Test',   'DEV'),
++    ('On Progress Dev',  'Hold',            'DEV'),
++    ('Ready to Test',    'On Progress QA',  'QA'),
++    ('On Progress QA',   'Close',           'QA'),
++    ('On Progress QA',   'Reopen',          'QA'),
++    ('Reopen',           'On Progress Dev', 'DEV'),
++    ('Hold',             'Open',            'QA');
++
++COMMIT;
+diff --git a/tcm-backend/db/schema.sql b/tcm-backend/db/schema.sql
+index 8bb5fcb..313b794 100644
+--- a/tcm-backend/db/schema.sql
++++ b/tcm-backend/db/schema.sql
+@@ -35,6 +35,7 @@ CREATE TABLE IF NOT EXISTS test_case_headers (
+     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+     header_code     CHAR(6) NOT NULL,
+     nama_test_case  VARCHAR(255) NOT NULL,
++    sprint          VARCHAR(50),
+     jira_url        VARCHAR(500),
+     nama_menu       VARCHAR(255) NOT NULL,
+     created_by      UUID NOT NULL REFERENCES users(id),
+@@ -122,14 +123,21 @@ CREATE TABLE IF NOT EXISTS bug_daily_counter (
+ CREATE TABLE IF NOT EXISTS bugs (
+     id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+     bug_no              VARCHAR(14) UNIQUE,
+-    test_case_item_id   UUID REFERENCES test_case_items(id),
++    test_case_item_id   UUID REFERENCES test_case_items(id) ON DELETE SET NULL,
+     reporter_id         UUID NOT NULL REFERENCES users(id),
+     scenario            TEXT NOT NULL,
+     steps_to_reproduce  TEXT NOT NULL,
+     expected_result     TEXT NOT NULL,
+     actual_result       TEXT NOT NULL,
+     status              VARCHAR(20) NOT NULL DEFAULT 'Open'
+-                          CHECK (status IN ('Open','Ready to Test','Reopen','Closed','Rejected')),
++                          CHECK (status IN (
++                            'Open', 'On Progress Dev', 'Ready to Test', 'On Progress QA',
++                            'Reopen', 'Close', 'Take Out', 'Hold'
++                          )),
++    severity            VARCHAR(10) NOT NULL DEFAULT 'Medium'
++                          CHECK (severity IN ('Critical','Major','Medium','Low')),
++    priority            VARCHAR(10) NOT NULL DEFAULT 'Medium'
++                          CHECK (priority IN ('Critical','High','Medium','Low')),
+     assigned_to         UUID REFERENCES users(id),
+     updated_by          UUID REFERENCES users(id),
+     created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+@@ -219,11 +227,16 @@ CREATE TABLE IF NOT EXISTS bug_status_transitions (
+ );
+ 
+ INSERT INTO bug_status_transitions (from_status, to_status, allowed_role) VALUES
+-    ('Open', 'Ready to Test', 'DEV'),
+-    ('Ready to Test', 'Reopen', 'QA'),
+-    ('Ready to Test', 'Closed', 'QA'),
+-    ('Reopen', 'Ready to Test', 'DEV'),
+-    ('Open', 'Rejected', 'QA')
++    ('Open',             'On Progress Dev', 'DEV'),
++    ('Open',             'Hold',            'QA'),
++    ('Open',             'Take Out',        'QA'),
++    ('On Progress Dev',  'Ready to Test',   'DEV'),
++    ('On Progress Dev',  'Hold',            'DEV'),
++    ('Ready to Test',    'On Progress QA',  'QA'),
++    ('On Progress QA',   'Close',           'QA'),
++    ('On Progress QA',   'Reopen',          'QA'),
++    ('Reopen',           'On Progress Dev', 'DEV'),
++    ('Hold',             'Open',            'QA')
+ ON CONFLICT DO NOTHING;
+ 
+ -- ---------- Attachments (generic) ----------
+diff --git a/tcm-backend/package.json b/tcm-backend/package.json
+index 6e295c2..cb2d015 100644
+--- a/tcm-backend/package.json
++++ b/tcm-backend/package.json
+@@ -20,6 +20,7 @@
+     "dotenv": "^17.4.2",
+     "express": "^5.2.1",
+     "jsonwebtoken": "^9.0.3",
++    "multer": "^2.0.1",
+     "pg": "^8.22.0",
+     "zod": "^4.4.3"
+   },
+@@ -30,6 +31,7 @@
+     "@types/cors": "^2.8.19",
+     "@types/express": "^5.0.6",
+     "@types/jsonwebtoken": "^9.0.10",
++    "@types/multer": "^1.4.12",
+     "@types/node": "^26.1.1",
+     "@types/pg": "^8.20.0",
+     "@types/supertest": "^7.2.1",
+diff --git a/tcm-backend/src/app.ts b/tcm-backend/src/app.ts
+index 46baea3..c9d4122 100644
+--- a/tcm-backend/src/app.ts
++++ b/tcm-backend/src/app.ts
+@@ -1,4 +1,5 @@
+ import express from 'express';
++import path from 'node:path';
+ import cors from 'cors';
+ import 'dotenv/config';
+ import { authRouter, usersRouter } from './routes/auth';
+@@ -11,6 +12,7 @@ export function createApp() {
+ 
+   app.use(cors({ origin: process.env.CORS_ORIGIN ?? 'http://localhost:5173' }));
+   app.use(express.json());
++  app.use('/uploads', express.static(path.resolve(__dirname, '../uploads')));
+ 
+   app.get('/health', (_req, res) => res.json({ status: 'ok' }));
+ 
+diff --git a/tcm-backend/src/middleware/upload.ts b/tcm-backend/src/middleware/upload.ts
+new file mode 100644
+index 0000000..741b761
+--- /dev/null
++++ b/tcm-backend/src/middleware/upload.ts
+@@ -0,0 +1,25 @@
++import fs from 'node:fs';
++import path from 'node:path';
++import multer from 'multer';
++
++export const UPLOAD_DIR = path.resolve(__dirname, '../../uploads');
++
++// Pastikan folder ada sebelum multer mencoba menulis ke sana.
++if (!fs.existsSync(UPLOAD_DIR)) {
++  fs.mkdirSync(UPLOAD_DIR, { recursive: true });
++}
++
++const storage = multer.diskStorage({
++  destination: (_req, _file, cb) => cb(null, UPLOAD_DIR),
++  filename: (_req, file, cb) => {
++    const ext = path.extname(file.originalname);
++    const unique = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
++    cb(null, `${unique}${ext}`);
++  },
++});
++
++// Batas 10MB per file — sesuaikan kalau dokumen pendukung bug (video/screenshot) perlu lebih besar.
++export const upload = multer({
++  storage,
++  limits: { fileSize: 10 * 1024 * 1024 },
++});
+diff --git a/tcm-backend/src/routes/bugs.ts b/tcm-backend/src/routes/bugs.ts
+index 1e28399..c01eebe 100644
+--- a/tcm-backend/src/routes/bugs.ts
++++ b/tcm-backend/src/routes/bugs.ts
+@@ -1,7 +1,9 @@
++import fs from 'node:fs';
+ import { Router } from 'express';
+ import { z } from 'zod';
+ import { authenticate, requireRole } from '../middleware/auth';
+ import { asyncHandler } from '../middleware/asyncHandler';
++import { upload } from '../middleware/upload';
+ import { paramStr } from '../utils/params';
+ import * as service from '../services/bugService';
+ 
+@@ -30,6 +32,8 @@ const createBugSchema = z.object({
+   expectedResult: z.string().min(1),
+   actualResult: z.string().min(1),
+   assignedTo: z.string().uuid().optional(),
++  severity: z.enum(['Critical', 'Major', 'Medium', 'Low']).default('Medium'),
++  priority: z.enum(['Critical', 'High', 'Medium', 'Low']).default('Medium'),
+ });
+ 
+ bugRouter.post('/bugs', requireRole('QA'), asyncHandler(async (req, res) => {
+@@ -40,7 +44,10 @@ bugRouter.post('/bugs', requireRole('QA'), asyncHandler(async (req, res) => {
+ }));
+ 
+ const statusSchema = z.object({
+-  status: z.enum(['Open', 'Ready to Test', 'Reopen', 'Closed', 'Rejected']),
++  status: z.enum([
++    'Open', 'On Progress Dev', 'Ready to Test', 'On Progress QA',
++    'Reopen', 'Close', 'Take Out', 'Hold',
++  ]),
+ });
+ 
+ bugRouter.patch('/bugs/:id/status', asyncHandler(async (req, res) => {
+@@ -75,3 +82,18 @@ bugRouter.post('/bugs/:id/comments', asyncHandler(async (req, res) => {
+   const comment = await service.addComment(id, req.auth!.sub, parsed.data.comment);
+   return res.status(201).json(comment);
+ }));
++
++bugRouter.post('/bugs/:id/attachments', upload.single('file'), asyncHandler(async (req, res) => {
++  const id = paramStr(req.params.id);
++  const exists = await service.bugExists(id);
++  if (!exists) {
++    if (req.file) fs.unlink(req.file.path, () => {});
++    return res.status(404).json({ message: 'Bug tidak ditemukan' });
++  }
++  if (!req.file) {
++    return res.status(400).json({ message: 'File tidak ditemukan pada request (field name harus "file")' });
++  }
++  const fileUrl = `${req.protocol}://${req.get('host')}/uploads/${req.file.filename}`;
++  const attachment = await service.addAttachment(id, fileUrl, req.file.originalname, req.auth!.sub);
++  return res.status(201).json(attachment);
++}));
+diff --git a/tcm-backend/src/routes/testCases.ts b/tcm-backend/src/routes/testCases.ts
+index 79c6da2..97fab9b 100644
+--- a/tcm-backend/src/routes/testCases.ts
++++ b/tcm-backend/src/routes/testCases.ts
+@@ -10,6 +10,7 @@ testCaseRouter.use(authenticate);
+ 
+ const headerSchema = z.object({
+   namaTestCase: z.string().min(1),
++  sprint: z.string().optional(),
+   jiraUrl: z.string().url().optional().or(z.literal('')),
+   namaMenu: z.string().min(1),
+ });
+@@ -25,6 +26,12 @@ testCaseRouter.post('/test-case-headers', requireRole('QA'), asyncHandler(async
+   return res.status(201).json(header);
+ }));
+ 
++testCaseRouter.delete('/test-case-headers/:id', requireRole('QA'), asyncHandler(async (req, res) => {
++  const deleted = await service.deleteHeader(paramStr(req.params.id));
++  if (!deleted) return res.status(404).json({ message: 'Test case header tidak ditemukan' });
++  return res.status(204).send();
++}));
++
+ testCaseRouter.get('/test-case-items', asyncHandler(async (req, res) => {
+   const headerId = typeof req.query.headerId === 'string' ? req.query.headerId : undefined;
+   res.json(await service.listItems(headerId));
+diff --git a/tcm-backend/src/services/bugService.ts b/tcm-backend/src/services/bugService.ts
+index 4e318c8..667d609 100644
+--- a/tcm-backend/src/services/bugService.ts
++++ b/tcm-backend/src/services/bugService.ts
+@@ -7,7 +7,8 @@ const BUG_SELECT = `
+     b.reporter_id AS "reporterId", reporter.full_name AS "reporterName",
+     b.scenario, b.steps_to_reproduce AS "stepsToReproduce",
+     b.expected_result AS "expectedResult", b.actual_result AS "actualResult",
+-    b.status, b.assigned_to AS "assignedTo", assignee.full_name AS "assignedToName",
++    b.status, b.severity, b.priority,
++    b.assigned_to AS "assignedTo", assignee.full_name AS "assignedToName",
+     b.created_at AS "createdAt", b.updated_at AS "updatedAt"
+   FROM bugs b
+   LEFT JOIN test_case_items tci ON tci.id = b.test_case_item_id
+@@ -15,14 +16,63 @@ const BUG_SELECT = `
+   LEFT JOIN users assignee ON assignee.id = b.assigned_to
+ `;
+ 
++interface AttachmentRow { id: string; bugId: string; fileUrl: string; fileName: string }
++
++const ATTACHMENT_SELECT = `
++  SELECT id, attachable_id AS "bugId", file_url AS "fileUrl", file_name AS "fileName"
++  FROM attachments
++  WHERE attachable_type = 'bug'
++`;
++
++export async function getAttachmentsForBug(bugId: string) {
++  const { rows } = await pool.query<AttachmentRow>(
++    `${ATTACHMENT_SELECT} AND attachable_id = $1 ORDER BY uploaded_at`,
++    [bugId],
++  );
++  return rows.map(({ id, fileUrl, fileName }) => ({ id, fileUrl, fileName }));
++}
++
++export async function getAttachmentsForBugs(bugIds: string[]) {
++  const map = new Map<string, Array<{ id: string; fileUrl: string; fileName: string }>>();
++  if (bugIds.length === 0) return map;
++  const { rows } = await pool.query<AttachmentRow>(
++    `${ATTACHMENT_SELECT} AND attachable_id = ANY($1::uuid[]) ORDER BY uploaded_at`,
++    [bugIds],
++  );
++  for (const row of rows) {
++    const list = map.get(row.bugId) ?? [];
++    list.push({ id: row.id, fileUrl: row.fileUrl, fileName: row.fileName });
++    map.set(row.bugId, list);
++  }
++  return map;
++}
++
++export async function addAttachment(bugId: string, fileUrl: string, fileName: string, uploadedBy: string) {
++  const { rows } = await pool.query(
++    `INSERT INTO attachments (attachable_type, attachable_id, file_url, file_name, uploaded_by)
++     VALUES ('bug', $1, $2, $3, $4)
++     RETURNING id, file_url AS "fileUrl", file_name AS "fileName"`,
++    [bugId, fileUrl, fileName, uploadedBy],
++  );
++  return rows[0];
++}
++
++export async function bugExists(id: string): Promise<boolean> {
++  const { rows } = await pool.query('SELECT 1 FROM bugs WHERE id = $1', [id]);
++  return rows.length > 0;
++}
++
+ export async function listBugs() {
+   const { rows } = await pool.query(`${BUG_SELECT} ORDER BY b.created_at DESC`);
+-  return rows;
++  const attachmentsMap = await getAttachmentsForBugs(rows.map((r) => r.id));
++  return rows.map((r) => ({ ...r, attachments: attachmentsMap.get(r.id) ?? [] }));
+ }
+ 
+ export async function getBugById(id: string) {
+   const { rows } = await pool.query(`${BUG_SELECT} WHERE b.id = $1`, [id]);
+-  return rows[0] ?? null;
++  if (!rows[0]) return null;
++  const attachments = await getAttachmentsForBug(id);
++  return { ...rows[0], attachments };
+ }
+ 
+ export async function getComments(bugId: string) {
+@@ -49,6 +99,7 @@ export async function getHistory(bugId: string) {
+ export async function createBug(input: {
+   testCaseNo?: string; reporterId: string; scenario: string; stepsToReproduce: string;
+   expectedResult: string; actualResult: string; assignedTo?: string;
++  severity: string; priority: string;
+ }) {
+   let testCaseItemId: string | null = null;
+   if (input.testCaseNo) {
+@@ -58,12 +109,13 @@ export async function createBug(input: {
+ 
+   const { rows } = await pool.query(
+     `INSERT INTO bugs (test_case_item_id, reporter_id, scenario, steps_to_reproduce,
+-                        expected_result, actual_result, assigned_to)
+-     VALUES ($1,$2,$3,$4,$5,$6,$7)
++                        expected_result, actual_result, assigned_to, severity, priority)
++     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+      RETURNING id`,
+     [
+       testCaseItemId, input.reporterId, input.scenario, input.stepsToReproduce,
+       input.expectedResult, input.actualResult, input.assignedTo ?? null,
++      input.severity, input.priority,
+     ],
+   );
+   return getBugById(rows[0].id);
+diff --git a/tcm-backend/src/services/testCaseService.ts b/tcm-backend/src/services/testCaseService.ts
+index 228d365..a3917c8 100644
+--- a/tcm-backend/src/services/testCaseService.ts
++++ b/tcm-backend/src/services/testCaseService.ts
+@@ -1,27 +1,37 @@
+ import { pool } from '../db/pool';
+ 
++const HEADER_SELECT = `
++  SELECT
++    h.id, h.header_code AS "headerCode", h.nama_test_case AS "namaTestCase",
++    h.sprint, h.jira_url AS "jiraUrl", h.nama_menu AS "namaMenu",
++    h.created_by AS "createdBy", u.full_name AS "createdByName",
++    h.created_at AS "createdAt", h.updated_at AS "updatedAt"
++  FROM test_case_headers h
++  LEFT JOIN users u ON u.id = h.created_by
++`;
++
+ export async function listHeaders() {
+-  const { rows } = await pool.query(
+-    `SELECT id, header_code AS "headerCode", nama_test_case AS "namaTestCase",
+-            jira_url AS "jiraUrl", nama_menu AS "namaMenu",
+-            created_by AS "createdBy", created_at AS "createdAt"
+-     FROM test_case_headers ORDER BY created_at DESC`,
+-  );
++  const { rows } = await pool.query(`${HEADER_SELECT} ORDER BY h.created_at DESC`);
+   return rows;
+ }
+ 
+ export async function createHeader(input: {
+-  namaTestCase: string; jiraUrl?: string; namaMenu: string; createdBy: string;
++  namaTestCase: string; sprint?: string; jiraUrl?: string; namaMenu: string; createdBy: string;
+ }) {
+   const { rows } = await pool.query(
+-    `INSERT INTO test_case_headers (nama_test_case, jira_url, nama_menu, created_by)
+-     VALUES ($1, $2, $3, $4)
+-     RETURNING id, header_code AS "headerCode", nama_test_case AS "namaTestCase",
+-               jira_url AS "jiraUrl", nama_menu AS "namaMenu",
+-               created_by AS "createdBy", created_at AS "createdAt"`,
+-    [input.namaTestCase, input.jiraUrl ?? null, input.namaMenu, input.createdBy],
++    `INSERT INTO test_case_headers (nama_test_case, sprint, jira_url, nama_menu, created_by)
++     VALUES ($1, $2, $3, $4, $5)
++     RETURNING id`,
++    [input.namaTestCase, input.sprint ?? null, input.jiraUrl ?? null, input.namaMenu, input.createdBy],
+   );
+-  return rows[0];
++  const { rows: full } = await pool.query(`${HEADER_SELECT} WHERE h.id = $1`, [rows[0].id]);
++  return full[0];
++}
++
++export async function deleteHeader(id: string): Promise<boolean> {
++  // ON DELETE CASCADE di FK test_case_items.header_id akan menghapus semua item di bawahnya juga.
++  const result = await pool.query('DELETE FROM test_case_headers WHERE id = $1', [id]);
++  return (result.rowCount ?? 0) > 0;
+ }
+ 
+ const ITEM_SELECT = `
+diff --git a/tcm-backend/src/test/smoke.ts b/tcm-backend/src/test/smoke.ts
+index f901870..4330991 100644
+--- a/tcm-backend/src/test/smoke.ts
++++ b/tcm-backend/src/test/smoke.ts
+@@ -121,32 +121,52 @@ async function main() {
+       assignedTo: loginDev.body.user.id,
+     });
+   check('Create bug as QA returns 201', bugRes.status === 201, bugRes.body);
+-  check('bug_no format is BUG-YYMMDD-NN', /^BUG-\d{6}-01$/.test(bugRes.body.bugNo), bugRes.body.bugNo);
++  check('bug_no format is BUG-YYMMDD-01', /^BUG-\d{6}-01$/.test(bugRes.body.bugNo), bugRes.body.bugNo);
++  check('Default severity is Medium', bugRes.body.severity === 'Medium', bugRes.body.severity);
++  check('Default priority is Medium', bugRes.body.priority === 'Medium', bugRes.body.priority);
+   const bugId = bugRes.body.id;
+ 
+   const qaTransitionForbidden = await request(app)
+     .patch(`/api/bugs/${bugId}/status`)
+     .set('Authorization', `Bearer ${qaToken}`)
+-    .send({ status: 'Ready to Test' });
+-  check('QA changing Open -> Ready to Test returns 403 (only DEV allowed)', qaTransitionForbidden.status === 403);
++    .send({ status: 'On Progress Dev' });
++  check('QA changing Open -> On Progress Dev returns 403 (only DEV allowed)', qaTransitionForbidden.status === 403);
++
++  const devStartOk = await request(app)
++    .patch(`/api/bugs/${bugId}/status`)
++    .set('Authorization', `Bearer ${devToken}`)
++    .send({ status: 'On Progress Dev' });
++  check('DEV changing Open -> On Progress Dev returns 200', devStartOk.status === 200, devStartOk.body);
+ 
+-  const devTransitionOk = await request(app)
++  const devReadyOk = await request(app)
+     .patch(`/api/bugs/${bugId}/status`)
+     .set('Authorization', `Bearer ${devToken}`)
+     .send({ status: 'Ready to Test' });
+-  check('DEV changing Open -> Ready to Test returns 200', devTransitionOk.status === 200, devTransitionOk.body);
++  check('DEV changing On Progress Dev -> Ready to Test returns 200', devReadyOk.status === 200, devReadyOk.body);
+ 
+-  const devCloseForbidden = await request(app)
++  const devSkipForbidden = await request(app)
+     .patch(`/api/bugs/${bugId}/status`)
+     .set('Authorization', `Bearer ${devToken}`)
+-    .send({ status: 'Closed' });
+-  check('DEV closing bug returns 403 (only QA allowed)', devCloseForbidden.status === 403);
++    .send({ status: 'Close' });
++  check('DEV closing bug returns 403 (only QA allowed)', devSkipForbidden.status === 403);
++
++  const qaRetestOk = await request(app)
++    .patch(`/api/bugs/${bugId}/status`)
++    .set('Authorization', `Bearer ${qaToken}`)
++    .send({ status: 'On Progress QA' });
++  check('QA changing Ready to Test -> On Progress QA returns 200', qaRetestOk.status === 200, qaRetestOk.body);
+ 
+   const qaCloseOk = await request(app)
+     .patch(`/api/bugs/${bugId}/status`)
+     .set('Authorization', `Bearer ${qaToken}`)
+-    .send({ status: 'Closed' });
+-  check('QA closing bug returns 200', qaCloseOk.status === 200 && qaCloseOk.body.status === 'Closed');
++    .send({ status: 'Close' });
++  check('QA closing bug returns 200', qaCloseOk.status === 200 && qaCloseOk.body.status === 'Close');
++
++  const attachmentRes = await request(app)
++    .post(`/api/bugs/${bugId}/attachments`)
++    .set('Authorization', `Bearer ${qaToken}`)
++    .attach('file', Buffer.from('dummy screenshot content'), 'screenshot.png');
++  check('Upload attachment returns 201 with fileName', attachmentRes.status === 201 && attachmentRes.body.fileName === 'screenshot.png', attachmentRes.body);
+ 
+   const commentRes = await request(app)
+     .post(`/api/bugs/${bugId}/comments`)
+@@ -158,11 +178,12 @@ async function main() {
+     .get(`/api/bugs/${bugId}`)
+     .set('Authorization', `Bearer ${qaToken}`);
+   check(
+-    'Bug status history has 3 entries (Open, Ready to Test, Closed)',
+-    bugDetail.body.history?.length === 3,
++    'Bug status history has 5 entries (Open, On Progress Dev, Ready to Test, On Progress QA, Close)',
++    bugDetail.body.history?.length === 5,
+     bugDetail.body.history,
+   );
+   check('Bug detail includes the comment', bugDetail.body.comments?.length === 1);
++  check('Bug detail includes the uploaded attachment', bugDetail.body.bug?.attachments?.length === 1, bugDetail.body.bug?.attachments);
+ 
+   const monitoringTc = await request(app)
+     .get('/api/monitoring/test-cases')
+@@ -175,12 +196,28 @@ async function main() {
+   const monitoringBug = await request(app)
+     .get('/api/monitoring/bugs')
+     .set('Authorization', `Bearer ${qaToken}`);
+-  const bugRow = monitoringBug.body.find((r: any) => r.status === 'Closed');
+-  check('Monitoring bug row for Closed status found', !!bugRow, monitoringBug.body);
++  const bugRow = monitoringBug.body.find((r: any) => r.status === 'Close');
++  check('Monitoring bug row for Close status found', !!bugRow, monitoringBug.body);
+ 
+   const noAuth = await request(app).get('/api/bugs');
+   check('Request without token returns 401', noAuth.status === 401);
+ 
++  const deleteHeaderForbidden = await request(app)
++    .delete(`/api/test-case-headers/${headerId}`)
++    .set('Authorization', `Bearer ${devToken}`);
++  check('DEV deleting test case header returns 403', deleteHeaderForbidden.status === 403);
++
++  const deleteHeaderOk = await request(app)
++    .delete(`/api/test-case-headers/${headerId}`)
++    .set('Authorization', `Bearer ${qaToken}`);
++  check('QA deleting test case header returns 204', deleteHeaderOk.status === 204);
++
++  const itemsAfterDelete = await request(app)
++    .get('/api/test-case-items')
++    .query({ headerId })
++    .set('Authorization', `Bearer ${qaToken}`);
++  check('Items under deleted header are cascade-deleted', itemsAfterDelete.body.length === 0, itemsAfterDelete.body);
++
+   console.log(`\n--- Result: ${failures === 0 ? 'ALL PASSED' : `${failures} FAILURE(S)`} ---`);
+ 
+   await pool.end();
+diff --git a/tcm-frontend/src/api/bugApi.ts b/tcm-frontend/src/api/bugApi.ts
+index 9aba2c5..405608b 100644
+--- a/tcm-frontend/src/api/bugApi.ts
++++ b/tcm-frontend/src/api/bugApi.ts
+@@ -1,5 +1,7 @@
+ import { axiosClient } from './axiosClient';
+-import type { Bug, BugComment, BugStatus, BugStatusHistory } from '../types/entities';
++import type {
++  Attachment, Bug, BugComment, BugStatus, BugStatusHistory, Priority, Severity,
++} from '../types/entities';
+ 
+ export async function listBugs(): Promise<Bug[]> {
+   const { data } = await axiosClient.get('/bugs');
+@@ -14,6 +16,7 @@ export async function getBugDetail(id: string): Promise<{ bug: Bug; comments: Bu
+ export async function createBug(payload: {
+   testCaseNo?: string; scenario: string; stepsToReproduce: string;
+   expectedResult: string; actualResult: string; assignedTo?: string;
++  severity: Severity; priority: Priority;
+ }): Promise<Bug> {
+   const { data } = await axiosClient.post('/bugs', payload);
+   return data;
+@@ -28,3 +31,14 @@ export async function addComment(id: string, comment: string): Promise<BugCommen
+   const { data } = await axiosClient.post(`/bugs/${id}/comments`, { comment });
+   return data;
+ }
++
++export async function uploadAttachment(bugId: string, file: File): Promise<Attachment> {
++  const formData = new FormData();
++  formData.append('file', file);
++  const { data } = await axiosClient.post(`/bugs/${bugId}/attachments`, formData, {
++    // Hapus header default 'application/json' dari axiosClient supaya browser yang
++    // mengisi Content-Type multipart/form-data lengkap dengan boundary-nya sendiri.
++    headers: { 'Content-Type': undefined },
++  });
++  return data;
++}
+diff --git a/tcm-frontend/src/api/testCaseApi.ts b/tcm-frontend/src/api/testCaseApi.ts
+index ee585da..a1f3638 100644
+--- a/tcm-frontend/src/api/testCaseApi.ts
++++ b/tcm-frontend/src/api/testCaseApi.ts
+@@ -7,12 +7,16 @@ export async function listHeaders(): Promise<TestCaseHeader[]> {
+ }
+ 
+ export async function createHeader(payload: {
+-  namaTestCase: string; jiraUrl: string; namaMenu: string;
++  namaTestCase: string; sprint?: string; jiraUrl: string; namaMenu: string;
+ }): Promise<TestCaseHeader> {
+   const { data } = await axiosClient.post('/test-case-headers', payload);
+   return data;
+ }
+ 
++export async function deleteHeader(id: string): Promise<void> {
++  await axiosClient.delete(`/test-case-headers/${id}`);
++}
++
+ export async function listItems(headerId?: string): Promise<TestCaseItem[]> {
+   const { data } = await axiosClient.get('/test-case-items', { params: headerId ? { headerId } : {} });
+   return data;
+diff --git a/tcm-frontend/src/app/routes.tsx b/tcm-frontend/src/app/routes.tsx
+index 545fb85..e5a15a2 100644
+--- a/tcm-frontend/src/app/routes.tsx
++++ b/tcm-frontend/src/app/routes.tsx
+@@ -3,6 +3,7 @@ import { PrivateRoute } from '../auth/PrivateRoute';
+ import { AppLayout } from '../components/layout/AppLayout';
+ import { LoginPage } from '../features/auth/LoginPage';
+ import { TestCaseListPage } from '../features/test-cases/TestCaseListPage';
++import { TestCaseItemsPage } from '../features/test-cases/TestCaseItemsPage';
+ import { BugListPage } from '../features/bugs/BugListPage';
+ import { MonitoringDashboardPage } from '../features/monitoring/MonitoringDashboardPage';
+ 
+@@ -15,6 +16,7 @@ export function AppRoutes() {
+         <Route element={<AppLayout />}>
+           <Route path="/" element={<Navigate to="/test-cases" replace />} />
+           <Route path="/test-cases" element={<TestCaseListPage />} />
++          <Route path="/test-cases/:headerId" element={<TestCaseItemsPage />} />
+           <Route path="/bugs" element={<BugListPage />} />
+           <Route path="/monitoring" element={<MonitoringDashboardPage />} />
+         </Route>
+diff --git a/tcm-frontend/src/components/ui/StatusBadge.tsx b/tcm-frontend/src/components/ui/StatusBadge.tsx
+index 16da729..bb929e5 100644
+--- a/tcm-frontend/src/components/ui/StatusBadge.tsx
++++ b/tcm-frontend/src/components/ui/StatusBadge.tsx
+@@ -1,18 +1,33 @@
+ export function StatusBadge({ status }: { status: string }) {
+   const colorMap: Record<string, string> = {
++    // test case item status
+     'Pass': '#16a34a',
+     'Fail': '#dc2626',
+     'Blocked': '#d97706',
+     'On Hold': '#6b7280',
+     'Not Executed': '#9ca3af',
++    // bug status
+     'Open': '#dc2626',
++    'On Progress Dev': '#7c3aed',
+     'Ready to Test': '#2563eb',
++    'On Progress QA': '#0891b2',
+     'Reopen': '#d97706',
++    'Close': '#16a34a',
++    'Take Out': '#6b7280',
++    'Hold': '#78716c',
++    // legacy status labels (dijaga supaya data lama tidak pecah tampilannya)
+     'Closed': '#16a34a',
+     'Rejected': '#6b7280',
++    // monitoring category
+     'Complete': '#16a34a',
+     'On Progress': '#2563eb',
+-    'Hold': '#6b7280',
++    // severity
++    'Critical': '#7f1d1d',
++    'Major': '#dc2626',
++    // priority (Medium/Low dipakai bersama di atas)
++    'High': '#ea580c',
++    'Medium': '#d97706',
++    'Low': '#65a30d',
+   };
+   const color = colorMap[status] ?? '#374151';
+   return (
+diff --git a/tcm-frontend/src/constants/bugWorkflow.ts b/tcm-frontend/src/constants/bugWorkflow.ts
+new file mode 100644
+index 0000000..2fda121
+--- /dev/null
++++ b/tcm-frontend/src/constants/bugWorkflow.ts
+@@ -0,0 +1,41 @@
++import type { BugStatus, Role } from '../types/entities';
++
++export interface BugStatusTransition {
++  from: BugStatus;
++  to: BugStatus;
++  role: Role;
++  label: string;
++}
++
++/**
++ * State machine untuk status bug.
++ *
++ * ASUMSI (perlu dikonfirmasi ke stakeholder, sama seperti asumsi lain di
++ * rancangan-tcm-system.md): urutan alur dirancang sebagai
++ *   Open -> On Progress Dev -> Ready to Test -> On Progress QA -> Close
++ *                                                              -> Reopen -> On Progress Dev (ulang)
++ *   Open -> Hold / Take Out (untuk bug yang ditunda atau invalid/duplikat)
++ *   Hold -> Open (lanjutkan lagi)
++ *
++ * Backend WAJIB memvalidasi transisi ini juga (lihat pola
++ * `bug_status_transitions` di rancangan-tcm-system.md) — daftar di sini
++ * hanya mengontrol tombol mana yang tampil di UI (UX), bukan enforcement
++ * sesungguhnya.
++ */
++export const BUG_STATUS_TRANSITIONS: BugStatusTransition[] = [
++  { from: 'Open', to: 'On Progress Dev', role: 'DEV', label: 'Mulai Dikerjakan (On Progress Dev)' },
++  { from: 'Open', to: 'Hold', role: 'QA', label: 'Hold' },
++  { from: 'Open', to: 'Take Out', role: 'QA', label: 'Take Out' },
++  { from: 'On Progress Dev', to: 'Ready to Test', role: 'DEV', label: 'Ready to Test' },
++  { from: 'On Progress Dev', to: 'Hold', role: 'DEV', label: 'Hold' },
++  { from: 'Ready to Test', to: 'On Progress QA', role: 'QA', label: 'Mulai Retest (On Progress QA)' },
++  { from: 'On Progress QA', to: 'Close', role: 'QA', label: 'Tandai Close (lolos retest)' },
++  { from: 'On Progress QA', to: 'Reopen', role: 'QA', label: 'Reopen (gagal retest)' },
++  { from: 'Reopen', to: 'On Progress Dev', role: 'DEV', label: 'Mulai Dikerjakan Ulang' },
++  { from: 'Hold', to: 'Open', role: 'QA', label: 'Lanjutkan (Unhold)' },
++];
++
++export function availableTransitions(status: BugStatus, role?: Role): BugStatusTransition[] {
++  if (!role) return [];
++  return BUG_STATUS_TRANSITIONS.filter((t) => t.from === status && t.role === role);
++}
+diff --git a/tcm-frontend/src/features/bugs/BugCreateForm.tsx b/tcm-frontend/src/features/bugs/BugCreateForm.tsx
+index 55d0d73..ecd3bf4 100644
+--- a/tcm-frontend/src/features/bugs/BugCreateForm.tsx
++++ b/tcm-frontend/src/features/bugs/BugCreateForm.tsx
+@@ -1,11 +1,13 @@
+ import { useState, type FormEvent } from 'react';
+ import { useAuth } from '../../auth/useAuth';
+-import { useCreateBug, useDevUsers } from './useBugs';
++import { useCreateBug, useDevUsers, useUploadAttachment } from './useBugs';
++import type { Priority, Severity } from '../../types/entities';
+ 
+ export function BugCreateForm({ onCreated }: { onCreated: () => void }) {
+   const { user } = useAuth();
+   const { data: devUsers = [] } = useDevUsers();
+   const createBug = useCreateBug();
++  const uploadAttachment = useUploadAttachment();
+ 
+   const [testCaseNo, setTestCaseNo] = useState('');
+   const [scenario, setScenario] = useState('');
+@@ -13,14 +15,37 @@ export function BugCreateForm({ onCreated }: { onCreated: () => void }) {
+   const [expectedResult, setExpectedResult] = useState('');
+   const [actualResult, setActualResult] = useState('');
+   const [assignedTo, setAssignedTo] = useState('');
++  const [severity, setSeverity] = useState<Severity>('Medium');
++  const [priority, setPriority] = useState<Priority>('Medium');
++  const [file, setFile] = useState<File | null>(null);
++  const [uploadError, setUploadError] = useState<string | null>(null);
+ 
+   async function handleSubmit(e: FormEvent) {
+     e.preventDefault();
+-    await createBug.mutateAsync({
+-      testCaseNo, scenario, stepsToReproduce, expectedResult, actualResult, assignedTo: assignedTo || undefined,
++    setUploadError(null);
++
++    const bug = await createBug.mutateAsync({
++      testCaseNo,
++      scenario,
++      stepsToReproduce,
++      expectedResult,
++      actualResult,
++      assignedTo: assignedTo || undefined,
++      severity,
++      priority,
+     });
++
++    if (file) {
++      try {
++        await uploadAttachment.mutateAsync({ bugId: bug.id, file });
++      } catch {
++        setUploadError('Bug berhasil dibuat, tapi upload dokumen gagal. Coba upload ulang dari halaman detail bug.');
++      }
++    }
++
+     setTestCaseNo(''); setScenario(''); setStepsToReproduce('');
+     setExpectedResult(''); setActualResult(''); setAssignedTo('');
++    setSeverity('Medium'); setPriority('Medium'); setFile(null);
+     onCreated();
+   }
+ 
+@@ -52,6 +77,24 @@ export function BugCreateForm({ onCreated }: { onCreated: () => void }) {
+           ))}
+         </select>
+       </div>
++      <div className="field">
++        <label>Severity</label>
++        <select value={severity} onChange={(e) => setSeverity(e.target.value as Severity)}>
++          <option value="Critical">Critical</option>
++          <option value="Major">Major</option>
++          <option value="Medium">Medium</option>
++          <option value="Low">Low</option>
++        </select>
++      </div>
++      <div className="field">
++        <label>Priority</label>
++        <select value={priority} onChange={(e) => setPriority(e.target.value as Priority)}>
++          <option value="Critical">Critical</option>
++          <option value="High">High</option>
++          <option value="Medium">Medium</option>
++          <option value="Low">Low</option>
++        </select>
++      </div>
+       <div className="field field-full">
+         <label>Scenario</label>
+         <textarea value={scenario} onChange={(e) => setScenario(e.target.value)} required />
+@@ -70,14 +113,25 @@ export function BugCreateForm({ onCreated }: { onCreated: () => void }) {
+       </div>
+       <div className="field">
+         <label>Upload Dokumen</label>
+-        <input type="file" disabled title="Mock: koneksi storage belum di-wire" />
++        <input
++          type="file"
++          accept=".png,.jpg,.jpeg,.pdf,.docx,.xlsx,.txt"
++          onChange={(e) => setFile(e.target.files?.[0] ?? null)}
++        />
+       </div>
+       <div className="field">
+         <label>Status</label>
+         <input value="Open (default)" disabled />
+       </div>
+-      <button type="submit" disabled={createBug.isPending}>
+-        {createBug.isPending ? 'Mengirim...' : 'Submit'}
++
++      {uploadError && <div className="error-text field-full">{uploadError}</div>}
++
++      <button type="submit" disabled={createBug.isPending || uploadAttachment.isPending}>
++        {createBug.isPending
++          ? 'Mengirim...'
++          : uploadAttachment.isPending
++            ? 'Mengunggah dokumen...'
++            : 'Submit'}
+       </button>
+     </form>
+   );
+diff --git a/tcm-frontend/src/features/bugs/BugDetailDrawer.tsx b/tcm-frontend/src/features/bugs/BugDetailDrawer.tsx
+index e33be1d..f87433f 100644
+--- a/tcm-frontend/src/features/bugs/BugDetailDrawer.tsx
++++ b/tcm-frontend/src/features/bugs/BugDetailDrawer.tsx
+@@ -1,8 +1,8 @@
+-import { useState, type FormEvent } from 'react';
++import { useRef, useState, type ChangeEvent, type FormEvent } from 'react';
+ import { useAuth } from '../../auth/useAuth';
+-import { RoleGuard } from '../../auth/RoleGuard';
+ import { StatusBadge } from '../../components/ui/StatusBadge';
+-import { useAddComment, useBugDetail, useChangeBugStatus } from './useBugs';
++import { availableTransitions } from '../../constants/bugWorkflow';
++import { useAddComment, useBugDetail, useChangeBugStatus, useUploadAttachment } from './useBugs';
+ import type { BugStatus } from '../../types/entities';
+ 
+ export function BugDetailDrawer({ bugId, onClose }: { bugId: string; onClose: () => void }) {
+@@ -10,8 +10,11 @@ export function BugDetailDrawer({ bugId, onClose }: { bugId: string; onClose: ()
+   const { data, isLoading } = useBugDetail(bugId);
+   const changeStatus = useChangeBugStatus();
+   const addComment = useAddComment();
++  const uploadAttachment = useUploadAttachment();
++  const fileInputRef = useRef<HTMLInputElement>(null);
+   const [comment, setComment] = useState('');
+   const [statusError, setStatusError] = useState<string | null>(null);
++  const [attachError, setAttachError] = useState<string | null>(null);
+ 
+   async function handleChangeStatus(status: BugStatus) {
+     setStatusError(null);
+@@ -30,6 +33,21 @@ export function BugDetailDrawer({ bugId, onClose }: { bugId: string; onClose: ()
+     setComment('');
+   }
+ 
++  async function handleFileSelected(e: ChangeEvent<HTMLInputElement>) {
++    const file = e.target.files?.[0];
++    if (!file) return;
++    setAttachError(null);
++    try {
++      await uploadAttachment.mutateAsync({ bugId, file });
++    } catch {
++      setAttachError('Gagal mengunggah dokumen.');
++    } finally {
++      if (fileInputRef.current) fileInputRef.current.value = '';
++    }
++  }
++
++  const availableActions = data ? availableTransitions(data.bug.status, user?.role) : [];
++
+   return (
+     <div className="modal-overlay" onClick={onClose}>
+       <div className="drawer-card" onClick={(e) => e.stopPropagation()}>
+@@ -40,7 +58,11 @@ export function BugDetailDrawer({ bugId, onClose }: { bugId: string; onClose: ()
+         ) : (
+           <>
+             <h2>{data.bug.bugNo}</h2>
+-            <StatusBadge status={data.bug.status} />
++            <div className="status-actions" style={{ marginBottom: 12 }}>
++              <StatusBadge status={data.bug.status} />
++              <StatusBadge status={data.bug.severity} />
++              <StatusBadge status={data.bug.priority} />
++            </div>
+ 
+             <dl className="detail-list">
+               <dt>Test Case</dt><dd>{data.bug.testCaseNo ?? '-'}</dd>
+@@ -52,26 +74,37 @@ export function BugDetailDrawer({ bugId, onClose }: { bugId: string; onClose: ()
+               <dt>Actual Result</dt><dd>{data.bug.actualResult}</dd>
+             </dl>
+ 
++            <h3>Dokumen Pendukung</h3>
++            <ul className="attachment-list">
++              {data.bug.attachments.length === 0 && <li className="muted">Belum ada dokumen.</li>}
++              {data.bug.attachments.map((a) => (
++                <li key={a.id}>
++                  <a href={a.fileUrl} target="_blank" rel="noreferrer">{a.fileName}</a>
++                </li>
++              ))}
++            </ul>
++            <input
++              ref={fileInputRef}
++              type="file"
++              onChange={handleFileSelected}
++              disabled={uploadAttachment.isPending}
++            />
++            {uploadAttachment.isPending && <p className="muted">Mengunggah...</p>}
++            {attachError && <div className="error-text">{attachError}</div>}
++
+             <div className="status-actions">
+-              <RoleGuard allow={['DEV']}>
+-                {data.bug.status === 'Open' && (
+-                  <button onClick={() => handleChangeStatus('Ready to Test')}>Mark Ready to Test</button>
+-                )}
+-                {data.bug.status === 'Reopen' && (
+-                  <button onClick={() => handleChangeStatus('Ready to Test')}>Mark Ready to Test (ulang)</button>
+-                )}
+-              </RoleGuard>
+-              <RoleGuard allow={['QA']}>
+-                {data.bug.status === 'Ready to Test' && (
+-                  <>
+-                    <button onClick={() => handleChangeStatus('Closed')}>Tandai Closed (lolos retest)</button>
+-                    <button className="btn-secondary" onClick={() => handleChangeStatus('Reopen')}>Reopen (gagal retest)</button>
+-                  </>
+-                )}
+-                {data.bug.status === 'Open' && (
+-                  <button className="btn-secondary" onClick={() => handleChangeStatus('Rejected')}>Reject</button>
+-                )}
+-              </RoleGuard>
++              {availableActions.map((action) => (
++                <button
++                  key={action.to}
++                  className={['Reopen', 'Hold', 'Take Out'].includes(action.to) ? 'btn-secondary' : ''}
++                  onClick={() => handleChangeStatus(action.to)}
++                >
++                  {action.label}
++                </button>
++              ))}
++              {availableActions.length === 0 && (
++                <span className="muted">Tidak ada aksi status untuk role Anda saat ini.</span>
++              )}
+             </div>
+             {statusError && <div className="error-text">{statusError}</div>}
+ 
+diff --git a/tcm-frontend/src/features/bugs/BugListPage.tsx b/tcm-frontend/src/features/bugs/BugListPage.tsx
+index ee76af2..d81ec12 100644
+--- a/tcm-frontend/src/features/bugs/BugListPage.tsx
++++ b/tcm-frontend/src/features/bugs/BugListPage.tsx
+@@ -32,6 +32,8 @@ export function BugListPage() {
+                 <th>Test Case</th>
+                 <th>Pembuat</th>
+                 <th>Scenario</th>
++                <th>Severity</th>
++                <th>Priority</th>
+                 <th>Status</th>
+                 <th>Assign to</th>
+                 <th></th>
+@@ -44,13 +46,15 @@ export function BugListPage() {
+                   <td>{b.testCaseNo ?? '-'}</td>
+                   <td>{b.reporterName}</td>
+                   <td>{b.scenario}</td>
++                  <td><StatusBadge status={b.severity} /></td>
++                  <td><StatusBadge status={b.priority} /></td>
+                   <td><StatusBadge status={b.status} /></td>
+                   <td>{b.assignedToName ?? '-'}</td>
+                   <td><button className="btn-link" onClick={() => setActiveBugId(b.id)}>Detail</button></td>
+                 </tr>
+               ))}
+               {bugs.length === 0 && (
+-                <tr><td colSpan={7} className="muted">Belum ada bug tercatat.</td></tr>
++                <tr><td colSpan={9} className="muted">Belum ada bug tercatat.</td></tr>
+               )}
+             </tbody>
+           </table>
+diff --git a/tcm-frontend/src/features/bugs/useBugs.ts b/tcm-frontend/src/features/bugs/useBugs.ts
+index 5229d76..d9051a5 100644
+--- a/tcm-frontend/src/features/bugs/useBugs.ts
++++ b/tcm-frontend/src/features/bugs/useBugs.ts
+@@ -45,3 +45,14 @@ export function useAddComment() {
+     onSuccess: (_data, variables) => qc.invalidateQueries({ queryKey: ['bugs', variables.id] }),
+   });
+ }
++
++export function useUploadAttachment() {
++  const qc = useQueryClient();
++  return useMutation({
++    mutationFn: ({ bugId, file }: { bugId: string; file: File }) => api.uploadAttachment(bugId, file),
++    onSuccess: (_data, variables) => {
++      qc.invalidateQueries({ queryKey: ['bugs', variables.bugId] });
++      qc.invalidateQueries({ queryKey: ['bugs'] });
++    },
++  });
++}
+diff --git a/tcm-frontend/src/features/test-cases/TestCaseCreateForm.tsx b/tcm-frontend/src/features/test-cases/TestCaseCreateForm.tsx
+deleted file mode 100644
+index 603cd6b..0000000
+--- a/tcm-frontend/src/features/test-cases/TestCaseCreateForm.tsx
++++ /dev/null
+@@ -1,42 +0,0 @@
+-import { useState, type FormEvent } from 'react';
+-import { useCreateHeader } from './useTestCases';
+-
+-export function TestCaseCreateForm({ onCreated }: { onCreated: (headerId: string) => void }) {
+-  const createHeader = useCreateHeader();
+-  const [namaTestCase, setNamaTestCase] = useState('');
+-  const [jiraUrl, setJiraUrl] = useState('');
+-  const [namaMenu, setNamaMenu] = useState('');
+-
+-  async function handleSubmit(e: FormEvent) {
+-    e.preventDefault();
+-    const header = await createHeader.mutateAsync({ namaTestCase, jiraUrl, namaMenu });
+-    setNamaTestCase('');
+-    setJiraUrl('');
+-    setNamaMenu('');
+-    onCreated(header.id);
+-  }
+-
+-  return (
+-    <form className="card form-inline" onSubmit={handleSubmit}>
+-      <div className="field">
+-        <label>ID Test Case</label>
+-        <input value="Otomatis (YYMMDD)" disabled />
+-      </div>
+-      <div className="field">
+-        <label>Nama Test Case</label>
+-        <input value={namaTestCase} onChange={(e) => setNamaTestCase(e.target.value)} required />
+-      </div>
+-      <div className="field">
+-        <label>Jira URL</label>
+-        <input value={jiraUrl} onChange={(e) => setJiraUrl(e.target.value)} placeholder="https://jira..." />
+-      </div>
+-      <div className="field">
+-        <label>Nama Menu</label>
+-        <input value={namaMenu} onChange={(e) => setNamaMenu(e.target.value)} required />
+-      </div>
+-      <button type="submit" disabled={createHeader.isPending}>
+-        {createHeader.isPending ? 'Menyimpan...' : 'Simpan'}
+-      </button>
+-    </form>
+-  );
+-}
+diff --git a/tcm-frontend/src/features/test-cases/TestCaseGrid.tsx b/tcm-frontend/src/features/test-cases/TestCaseGrid.tsx
+index 9c59663..42fa903 100644
+--- a/tcm-frontend/src/features/test-cases/TestCaseGrid.tsx
++++ b/tcm-frontend/src/features/test-cases/TestCaseGrid.tsx
+@@ -26,6 +26,11 @@ export function TestCaseGrid({ rows, readOnly, onCellChanged, onDelete }: TestCa
+         width: 120,
+         cellEditor: 'agSelectCellEditor',
+         cellEditorParams: { values: ['Positive', 'Negative'] },
++        cellRenderer: (params: { value?: string }) => {
++          if (!params.value) return '';
++          const color = params.value === 'Negative' ? '#dc2626' : '#16a34a';
++          return `<span style="color:${color};font-weight:600;">${params.value}</span>`;
++        },
+       },
+       { field: 'scenario', headerName: 'Scenario', editable: !readOnly, flex: 2, minWidth: 200 },
+       { field: 'steps', headerName: 'Steps', editable: !readOnly, flex: 2, minWidth: 200 },
+diff --git a/tcm-frontend/src/features/test-cases/TestCaseHeaderFormModal.tsx b/tcm-frontend/src/features/test-cases/TestCaseHeaderFormModal.tsx
+new file mode 100644
+index 0000000..e45c6ef
+--- /dev/null
++++ b/tcm-frontend/src/features/test-cases/TestCaseHeaderFormModal.tsx
+@@ -0,0 +1,70 @@
++import { useState, type FormEvent } from 'react';
++import { useCreateHeader } from './useTestCases';
++
++interface Props {
++  onClose: () => void;
++  onCreated: (headerId: string) => void;
++}
++
++export function TestCaseHeaderFormModal({ onClose, onCreated }: Props) {
++  const createHeader = useCreateHeader();
++  const [namaTestCase, setNamaTestCase] = useState('');
++  const [sprint, setSprint] = useState('');
++  const [namaMenu, setNamaMenu] = useState('');
++  const [jiraUrl, setJiraUrl] = useState('');
++  const [error, setError] = useState<string | null>(null);
++
++  async function handleSubmit(e: FormEvent) {
++    e.preventDefault();
++    setError(null);
++    try {
++      const header = await createHeader.mutateAsync({ namaTestCase, sprint, namaMenu, jiraUrl });
++      onCreated(header.id);
++    } catch {
++      setError('Gagal menyimpan test case. Coba lagi.');
++    }
++  }
++
++  return (
++    <div className="modal-overlay" onClick={onClose}>
++      <form className="modal-card modal-card-lg" onClick={(e) => e.stopPropagation()} onSubmit={handleSubmit}>
++        <h3>Tambah Test Case</h3>
++
++        <div className="field">
++          <label>ID Test Case</label>
++          <input value="Otomatis (YYMMDD)" disabled />
++        </div>
++        <div className="field">
++          <label>Nama Test Case</label>
++          <input
++            value={namaTestCase}
++            onChange={(e) => setNamaTestCase(e.target.value)}
++            required
++            autoFocus
++          />
++        </div>
++        <div className="field">
++          <label>Sprint</label>
++          <input value={sprint} onChange={(e) => setSprint(e.target.value)} placeholder="Sprint 12" />
++        </div>
++        <div className="field">
++          <label>Nama Menu</label>
++          <input value={namaMenu} onChange={(e) => setNamaMenu(e.target.value)} required />
++        </div>
++        <div className="field">
++          <label>Jira URL</label>
++          <input value={jiraUrl} onChange={(e) => setJiraUrl(e.target.value)} placeholder="https://jira..." />
++        </div>
++
++        {error && <div className="error-text">{error}</div>}
++
++        <div className="modal-actions">
++          <button type="button" className="btn-secondary" onClick={onClose}>Batal</button>
++          <button type="submit" disabled={createHeader.isPending}>
++            {createHeader.isPending ? 'Menyimpan...' : 'Simpan'}
++          </button>
++        </div>
++      </form>
++    </div>
++  );
++}
+diff --git a/tcm-frontend/src/features/test-cases/TestCaseItemsPage.tsx b/tcm-frontend/src/features/test-cases/TestCaseItemsPage.tsx
+new file mode 100644
+index 0000000..9fab023
+--- /dev/null
++++ b/tcm-frontend/src/features/test-cases/TestCaseItemsPage.tsx
+@@ -0,0 +1,91 @@
++import { useState } from 'react';
++import { useNavigate, useParams } from 'react-router-dom';
++import { useAuth } from '../../auth/useAuth';
++import { RoleGuard } from '../../auth/RoleGuard';
++import { ConfirmDialog } from '../../components/ui/ConfirmDialog';
++import { TestCaseGrid } from './TestCaseGrid';
++import {
++  useCreateItem, useDeleteItem, useHeaders, useItems, useUpdateItem,
++} from './useTestCases';
++import type { TestCaseItem } from '../../types/entities';
++
++export function TestCaseItemsPage() {
++  const { headerId } = useParams<{ headerId: string }>();
++  const navigate = useNavigate();
++  const { user } = useAuth();
++  const readOnly = user?.role !== 'QA';
++
++  const { data: headers = [] } = useHeaders();
++  const header = headers.find((h) => h.id === headerId);
++
++  const { data: items = [], isLoading } = useItems(headerId);
++  const createItem = useCreateItem(headerId ?? '');
++  const updateItem = useUpdateItem();
++  const deleteItem = useDeleteItem();
++  const [pendingDelete, setPendingDelete] = useState<TestCaseItem | null>(null);
++
++  function handleAddRow() {
++    if (!headerId) return;
++    createItem.mutate({
++      featureName: '',
++      testType: 'Positive',
++      scenario: '',
++      steps: '',
++      expectedResult: '',
++      status: 'Not Executed',
++      // "tanggal otomatis date time" — diisi otomatis saat baris dibuat, tetap bisa disunting QA kalau perlu koreksi
++      testDate: new Date().toISOString(),
++    });
++  }
++
++  return (
++    <div className="page">
++      <button className="btn-secondary mb-3" onClick={() => navigate('/test-cases')}>
++        &larr; Kembali ke List Test Case
++      </button>
++      <h1>{header ? `${header.headerCode} — ${header.namaTestCase}` : 'Test Case'}</h1>
++      {header && (
++        <p className="muted-inline">
++          Menu: <strong>{header.namaMenu}</strong>
++          {header.sprint && <> · Sprint: <strong>{header.sprint}</strong></>}
++          {header.jiraUrl && (
++            <>
++              {' · '}
++              <a href={header.jiraUrl} target="_blank" rel="noreferrer">Jira</a>
++            </>
++          )}
++        </p>
++      )}
++
++      <div className="card">
++        <div className="toolbar">
++          <RoleGuard allow={['QA']}>
++            <button onClick={handleAddRow} disabled={!headerId}>+ Tambah Baris</button>
++          </RoleGuard>
++        </div>
++
++        {isLoading ? (
++          <p>Memuat data...</p>
++        ) : (
++          <TestCaseGrid
++            rows={items}
++            readOnly={readOnly}
++            onCellChanged={(row) => updateItem.mutate({ id: row.id, payload: row })}
++            onDelete={(row) => setPendingDelete(row)}
++          />
++        )}
++      </div>
++
++      <ConfirmDialog
++        open={!!pendingDelete}
++        title={`Hapus test case ${pendingDelete?.caseNo}?`}
++        description="Tindakan ini tidak bisa dibatalkan."
++        onCancel={() => setPendingDelete(null)}
++        onConfirm={async () => {
++          if (pendingDelete) await deleteItem.mutateAsync(pendingDelete.id);
++          setPendingDelete(null);
++        }}
++      />
++    </div>
++  );
++}
+diff --git a/tcm-frontend/src/features/test-cases/TestCaseListPage.tsx b/tcm-frontend/src/features/test-cases/TestCaseListPage.tsx
+index 71c0455..bb7f02f 100644
+--- a/tcm-frontend/src/features/test-cases/TestCaseListPage.tsx
++++ b/tcm-frontend/src/features/test-cases/TestCaseListPage.tsx
+@@ -1,86 +1,121 @@
+-import { useState } from 'react';
+-import { useAuth } from '../../auth/useAuth';
++import { useMemo, useState } from 'react';
++import { useNavigate } from 'react-router-dom';
+ import { RoleGuard } from '../../auth/RoleGuard';
+ import { ConfirmDialog } from '../../components/ui/ConfirmDialog';
+-import { TestCaseCreateForm } from './TestCaseCreateForm';
+-import { TestCaseGrid } from './TestCaseGrid';
+-import {
+-  useCreateItem, useDeleteItem, useHeaders, useItems, useUpdateItem,
+-} from './useTestCases';
+-import type { TestCaseItem } from '../../types/entities';
++import { TestCaseHeaderFormModal } from './TestCaseHeaderFormModal';
++import { useDeleteHeader, useHeaders } from './useTestCases';
++import type { TestCaseHeader } from '../../types/entities';
+ 
+ export function TestCaseListPage() {
+-  const { user } = useAuth();
+-  const readOnly = user?.role !== 'QA';
++  const navigate = useNavigate();
++  const { data: headers = [], isLoading } = useHeaders();
++  const deleteHeader = useDeleteHeader();
+ 
+-  const { data: headers = [] } = useHeaders();
+-  const [selectedHeaderId, setSelectedHeaderId] = useState<string | undefined>(undefined);
+-  const activeHeaderId = selectedHeaderId ?? headers[0]?.id;
++  const [showForm, setShowForm] = useState(false);
++  const [search, setSearch] = useState('');
++  const [menuFilter, setMenuFilter] = useState('');
++  const [pendingDelete, setPendingDelete] = useState<TestCaseHeader | null>(null);
+ 
+-  const { data: items = [], isLoading } = useItems(activeHeaderId);
+-  const createItem = useCreateItem(activeHeaderId ?? '');
+-  const updateItem = useUpdateItem();
+-  const deleteItem = useDeleteItem();
+-  const [pendingDelete, setPendingDelete] = useState<TestCaseItem | null>(null);
++  const menuOptions = useMemo(
++    () => Array.from(new Set(headers.map((h) => h.namaMenu))).sort(),
++    [headers],
++  );
+ 
+-  function handleAddRow() {
+-    if (!activeHeaderId) return;
+-    createItem.mutate({
+-      featureName: '',
+-      testType: 'Positive',
+-      scenario: '',
+-      steps: '',
+-      expectedResult: '',
+-      status: 'Not Executed',
++  const filteredHeaders = useMemo(() => {
++    const q = search.trim().toLowerCase();
++    return headers.filter((h) => {
++      const matchesSearch = !q
++        || h.namaTestCase.toLowerCase().includes(q)
++        || h.headerCode.toLowerCase().includes(q);
++      const matchesMenu = !menuFilter || h.namaMenu === menuFilter;
++      return matchesSearch && matchesMenu;
+     });
+-  }
++  }, [headers, search, menuFilter]);
+ 
+   return (
+     <div className="page">
+       <h1>Test Case</h1>
+ 
+-      <RoleGuard allow={['QA']}>
+-        <TestCaseCreateForm onCreated={(id) => setSelectedHeaderId(id)} />
+-      </RoleGuard>
+-
+       <div className="card">
+         <div className="toolbar">
+-          <label>Suite / Header:</label>
+-          <select
+-            value={activeHeaderId ?? ''}
+-            onChange={(e) => setSelectedHeaderId(e.target.value)}
+-          >
+-            {headers.map((h) => (
+-              <option key={h.id} value={h.id}>
+-                {h.headerCode} — {h.namaTestCase} ({h.namaMenu})
+-              </option>
++          <input
++            className="search-input"
++            placeholder="Cari ID atau nama test case..."
++            value={search}
++            onChange={(e) => setSearch(e.target.value)}
++          />
++          <select value={menuFilter} onChange={(e) => setMenuFilter(e.target.value)}>
++            <option value="">Semua Menu</option>
++            {menuOptions.map((m) => (
++              <option key={m} value={m}>{m}</option>
+             ))}
+           </select>
+-
+           <RoleGuard allow={['QA']}>
+-            <button onClick={handleAddRow} disabled={!activeHeaderId}>+ Tambah Baris</button>
++            <button onClick={() => setShowForm(true)}>+ Tambah Test Case</button>
+           </RoleGuard>
+         </div>
+ 
+         {isLoading ? (
+           <p>Memuat data...</p>
+         ) : (
+-          <TestCaseGrid
+-            rows={items}
+-            readOnly={readOnly}
+-            onCellChanged={(row) => updateItem.mutate({ id: row.id, payload: row })}
+-            onDelete={(row) => setPendingDelete(row)}
+-          />
++          <table className="data-table">
++            <thead>
++              <tr>
++                <th>Action</th>
++                <th>ID Test Case</th>
++                <th>Nama Test Case</th>
++                <th>Sprint</th>
++                <th>Nama Menu</th>
++                <th>Jira URL</th>
++                <th>Create By</th>
++                <th>Create Date</th>
++                <th>Update Date</th>
++              </tr>
++            </thead>
++            <tbody>
++              {filteredHeaders.map((h) => (
++                <tr key={h.id}>
++                  <td className="action-cell">
++                    <button className="btn-link" onClick={() => navigate(`/test-cases/${h.id}`)}>Edit</button>
++                    <RoleGuard allow={['QA']}>
++                      <button className="btn-link btn-link-danger" onClick={() => setPendingDelete(h)}>Hapus</button>
++                    </RoleGuard>
++                  </td>
++                  <td>{h.headerCode}</td>
++                  <td>{h.namaTestCase}</td>
++                  <td>{h.sprint || '-'}</td>
++                  <td>{h.namaMenu}</td>
++                  <td>{h.jiraUrl ? <a href={h.jiraUrl} target="_blank" rel="noreferrer">Link</a> : '-'}</td>
++                  <td>{h.createdByName ?? h.createdBy}</td>
++                  <td>{new Date(h.createdAt).toLocaleString('id-ID')}</td>
++                  <td>{h.updatedAt ? new Date(h.updatedAt).toLocaleString('id-ID') : '-'}</td>
++                </tr>
++              ))}
++              {filteredHeaders.length === 0 && (
++                <tr><td colSpan={9} className="muted">Tidak ada test case ditemukan.</td></tr>
++              )}
++            </tbody>
++          </table>
+         )}
+       </div>
+ 
++      {showForm && (
++        <TestCaseHeaderFormModal
++          onClose={() => setShowForm(false)}
++          onCreated={(id) => {
++            setShowForm(false);
++            navigate(`/test-cases/${id}`);
++          }}
++        />
++      )}
++
+       <ConfirmDialog
+         open={!!pendingDelete}
+-        title={`Hapus test case ${pendingDelete?.caseNo}?`}
+-        description="Tindakan ini tidak bisa dibatalkan."
++        title={`Hapus test case ${pendingDelete?.headerCode}?`}
++        description="Semua baris test case di dalamnya akan ikut terhapus. Tindakan ini tidak bisa dibatalkan."
+         onCancel={() => setPendingDelete(null)}
+         onConfirm={async () => {
+-          if (pendingDelete) await deleteItem.mutateAsync(pendingDelete.id);
++          if (pendingDelete) await deleteHeader.mutateAsync(pendingDelete.id);
+           setPendingDelete(null);
+         }}
+       />
+diff --git a/tcm-frontend/src/features/test-cases/useTestCases.ts b/tcm-frontend/src/features/test-cases/useTestCases.ts
+index 646cd28..5f324f1 100644
+--- a/tcm-frontend/src/features/test-cases/useTestCases.ts
++++ b/tcm-frontend/src/features/test-cases/useTestCases.ts
+@@ -14,6 +14,14 @@ export function useCreateHeader() {
+   });
+ }
+ 
++export function useDeleteHeader() {
++  const qc = useQueryClient();
++  return useMutation({
++    mutationFn: (id: string) => api.deleteHeader(id),
++    onSuccess: () => qc.invalidateQueries({ queryKey: ['test-case-headers'] }),
++  });
++}
++
+ export function useItems(headerId?: string) {
+   return useQuery({
+     queryKey: ['test-case-items', headerId ?? 'all'],
+diff --git a/tcm-frontend/src/index.css b/tcm-frontend/src/index.css
+index 0e391a0..e7e79e7 100644
+--- a/tcm-frontend/src/index.css
++++ b/tcm-frontend/src/index.css
+@@ -95,8 +95,16 @@ textarea { min-height: 60px; font-family: inherit; }
+   display: flex; align-items: center; justify-content: center; z-index: 50;
+ }
+ .modal-card { background: #fff; border-radius: 10px; padding: 20px; width: 360px; }
++.modal-card-lg { width: 480px; display: flex; flex-direction: column; gap: 12px; }
+ .modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 16px; }
+ 
++.search-input { width: 260px; }
++.action-cell { display: flex; gap: 10px; white-space: nowrap; }
++.btn-link-danger { color: #dc2626; }
++.muted-inline { color: #6b7280; font-size: 13px; margin-top: -8px; }
++.attachment-list { list-style: none; padding: 0; margin: 8px 0; font-size: 13px; }
++.attachment-list li { padding: 4px 0; }
++
+ .drawer-card {
+   background: #fff; border-radius: 10px; padding: 24px; width: 560px; max-height: 90vh; overflow: auto;
+ }
+diff --git a/tcm-frontend/src/mocks/handlers.ts b/tcm-frontend/src/mocks/handlers.ts
+index 1dc45d2..08c38b5 100644
+--- a/tcm-frontend/src/mocks/handlers.ts
++++ b/tcm-frontend/src/mocks/handlers.ts
+@@ -1,9 +1,12 @@
+ import { http, HttpResponse } from 'msw';
+ import {
+   users, credentials, findUser, testCaseHeaders, testCaseItems, bugs, bugComments,
+-  bugStatusHistory, bugStatusTransitions, dailyCounters, nextSeq, todayCode,
++  bugStatusHistory, dailyCounters, nextSeq, todayCode,
+ } from './seedData';
+-import type { Role, TestCaseItem, Bug, BugStatus } from '../types/entities';
++import { BUG_STATUS_TRANSITIONS } from '../constants/bugWorkflow';
++import type {
++  Role, TestCaseItem, TestCaseHeader, Bug, BugStatus,
++} from '../types/entities';
+ 
+ const API = '/api';
+ 
+@@ -41,6 +44,10 @@ function withBugNames(bug: Bug): Bug {
+   };
+ }
+ 
++function withHeaderNames(header: TestCaseHeader): TestCaseHeader {
++  return { ...header, createdByName: findUser(header.createdBy)?.fullName };
++}
++
+ export const handlers = [
+   // ---------------- AUTH ----------------
+   http.post(`${API}/auth/login`, async ({ request }) => {
+@@ -65,7 +72,7 @@ export const handlers = [
+   // ---------------- TEST CASE HEADERS ----------------
+   http.get(`${API}/test-case-headers`, ({ request }) => {
+     if (!requireAuth(request)) return HttpResponse.json({ message: 'Unauthorized' }, { status: 401 });
+-    return HttpResponse.json(testCaseHeaders);
++    return HttpResponse.json(testCaseHeaders.map(withHeaderNames));
+   }),
+ 
+   http.post(`${API}/test-case-headers`, async ({ request }) => {
+@@ -73,18 +80,38 @@ export const handlers = [
+     if (!auth) return HttpResponse.json({ message: 'Unauthorized' }, { status: 401 });
+     if (auth.role !== 'QA') return HttpResponse.json({ message: 'Forbidden: hanya QA' }, { status: 403 });
+ 
+-    const body = (await request.json()) as { namaTestCase: string; jiraUrl: string; namaMenu: string };
+-    const header = {
++    const body = (await request.json()) as {
++      namaTestCase: string; sprint?: string; jiraUrl: string; namaMenu: string;
++    };
++    const now = new Date().toISOString();
++    const header: TestCaseHeader = {
+       id: `h-${testCaseHeaders.length + 1}`,
+       headerCode: todayCode(),
+       namaTestCase: body.namaTestCase,
++      sprint: body.sprint,
+       jiraUrl: body.jiraUrl,
+       namaMenu: body.namaMenu,
+       createdBy: auth.sub,
+-      createdAt: new Date().toISOString(),
++      createdAt: now,
++      updatedAt: now,
+     };
+     testCaseHeaders.push(header);
+-    return HttpResponse.json(header, { status: 201 });
++    return HttpResponse.json(withHeaderNames(header), { status: 201 });
++  }),
++
++  http.delete(`${API}/test-case-headers/:id`, ({ request, params }) => {
++    const auth = requireAuth(request);
++    if (!auth) return HttpResponse.json({ message: 'Unauthorized' }, { status: 401 });
++    if (auth.role !== 'QA') return HttpResponse.json({ message: 'Forbidden: hanya QA' }, { status: 403 });
++
++    const idx = testCaseHeaders.findIndex((h) => h.id === params.id);
++    if (idx === -1) return HttpResponse.json({ message: 'Not found' }, { status: 404 });
++    testCaseHeaders.splice(idx, 1);
++    // cascade delete semua item di bawah header ini
++    for (let i = testCaseItems.length - 1; i >= 0; i -= 1) {
++      if (testCaseItems[i].headerId === params.id) testCaseItems.splice(i, 1);
++    }
++    return new HttpResponse(null, { status: 204 });
+   }),
+ 
+   // ---------------- TEST CASE ITEMS ----------------
+@@ -198,6 +225,8 @@ export const handlers = [
+       expectedResult: body.expectedResult ?? '',
+       actualResult: body.actualResult ?? '',
+       status: 'Open',
++      severity: body.severity ?? 'Medium',
++      priority: body.priority ?? 'Medium',
+       assignedTo: body.assignedTo,
+       attachments: [],
+       createdAt: now,
+@@ -219,7 +248,7 @@ export const handlers = [
+     if (!bug) return HttpResponse.json({ message: 'Not found' }, { status: 404 });
+ 
+     const { status: toStatus } = (await request.json()) as { status: BugStatus };
+-    const allowed = bugStatusTransitions.some(
++    const allowed = BUG_STATUS_TRANSITIONS.some(
+       (t) => t.from === bug.status && t.to === toStatus && t.role === auth.role,
+     );
+     if (!allowed) {
+diff --git a/tcm-frontend/src/mocks/seedData.ts b/tcm-frontend/src/mocks/seedData.ts
+index cbb96d1..1ef51de 100644
+--- a/tcm-frontend/src/mocks/seedData.ts
++++ b/tcm-frontend/src/mocks/seedData.ts
+@@ -47,10 +47,12 @@ export const testCaseHeaders: TestCaseHeader[] = [
+     id: 'h-1',
+     headerCode: todayCode(),
+     namaTestCase: 'Login Module',
++    sprint: 'Sprint 1',
+     jiraUrl: 'https://jira.kopnus.com/browse/QA-101',
+     namaMenu: 'Login',
+     createdBy: 'u-qa-1',
+     createdAt: new Date().toISOString(),
++    updatedAt: new Date().toISOString(),
+   },
+ ];
+ 
+@@ -117,11 +119,5 @@ export const bugs: Bug[] = [];
+ export const bugComments: BugComment[] = [];
+ export const bugStatusHistory: BugStatusHistory[] = [];
+ 
+-// Allowed transitions: from_status -> to_status -> allowed role
+-export const bugStatusTransitions: Array<{ from: string; to: string; role: 'QA' | 'DEV' }> = [
+-  { from: 'Open', to: 'Ready to Test', role: 'DEV' },
+-  { from: 'Ready to Test', to: 'Reopen', role: 'QA' },
+-  { from: 'Ready to Test', to: 'Closed', role: 'QA' },
+-  { from: 'Reopen', to: 'Ready to Test', role: 'DEV' },
+-  { from: 'Open', to: 'Rejected', role: 'QA' },
+-];
++// Aturan transisi status bug sekarang ada di satu tempat: src/constants/bugWorkflow.ts
++// (dipakai bareng oleh UI dan mock handler ini, supaya tidak ada dua "sumber kebenaran").
+diff --git a/tcm-frontend/src/types/entities.ts b/tcm-frontend/src/types/entities.ts
+index e1405ea..a75d2ec 100644
+--- a/tcm-frontend/src/types/entities.ts
++++ b/tcm-frontend/src/types/entities.ts
+@@ -17,10 +17,13 @@ export interface TestCaseHeader {
+   id: string;
+   headerCode: string; // '260722'
+   namaTestCase: string;
++  sprint?: string;
+   jiraUrl: string;
+   namaMenu: string;
+   createdBy: string;
++  createdByName?: string;
+   createdAt: string;
++  updatedAt?: string;
+ }
+ 
+ export type TestType = 'Positive' | 'Negative';
+@@ -49,7 +52,18 @@ export interface TestCaseItem {
+   updatedAt: string;
+ }
+ 
+-export type BugStatus = 'Open' | 'Ready to Test' | 'Reopen' | 'Closed' | 'Rejected';
++export type BugStatus =
++  | 'Open'
++  | 'On Progress Dev'
++  | 'Ready to Test'
++  | 'On Progress QA'
++  | 'Reopen'
++  | 'Close'
++  | 'Take Out'
++  | 'Hold';
++
++export type Severity = 'Critical' | 'Major' | 'Medium' | 'Low';
++export type Priority = 'Critical' | 'High' | 'Medium' | 'Low';
+ 
+ export interface Attachment {
+   id: string;
+@@ -69,6 +83,8 @@ export interface Bug {
+   expectedResult: string;
+   actualResult: string;
+   status: BugStatus;
++  severity: Severity;
++  priority: Priority;
+   assignedTo?: string;
+   assignedToName?: string;
+   attachments: Attachment[];

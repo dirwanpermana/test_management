@@ -1,27 +1,37 @@
 import { pool } from '../db/pool';
 
+const HEADER_SELECT = `
+  SELECT
+    h.id, h.header_code AS "headerCode", h.nama_test_case AS "namaTestCase",
+    h.sprint, h.jira_url AS "jiraUrl", h.nama_menu AS "namaMenu",
+    h.created_by AS "createdBy", u.full_name AS "createdByName",
+    h.created_at AS "createdAt", h.updated_at AS "updatedAt"
+  FROM test_case_headers h
+  LEFT JOIN users u ON u.id = h.created_by
+`;
+
 export async function listHeaders() {
-  const { rows } = await pool.query(
-    `SELECT id, header_code AS "headerCode", nama_test_case AS "namaTestCase",
-            jira_url AS "jiraUrl", nama_menu AS "namaMenu",
-            created_by AS "createdBy", created_at AS "createdAt"
-     FROM test_case_headers ORDER BY created_at DESC`,
-  );
+  const { rows } = await pool.query(`${HEADER_SELECT} ORDER BY h.created_at DESC`);
   return rows;
 }
 
 export async function createHeader(input: {
-  namaTestCase: string; jiraUrl?: string; namaMenu: string; createdBy: string;
+  namaTestCase: string; sprint?: string; jiraUrl?: string; namaMenu: string; createdBy: string;
 }) {
   const { rows } = await pool.query(
-    `INSERT INTO test_case_headers (nama_test_case, jira_url, nama_menu, created_by)
-     VALUES ($1, $2, $3, $4)
-     RETURNING id, header_code AS "headerCode", nama_test_case AS "namaTestCase",
-               jira_url AS "jiraUrl", nama_menu AS "namaMenu",
-               created_by AS "createdBy", created_at AS "createdAt"`,
-    [input.namaTestCase, input.jiraUrl ?? null, input.namaMenu, input.createdBy],
+    `INSERT INTO test_case_headers (nama_test_case, sprint, jira_url, nama_menu, created_by)
+     VALUES ($1, $2, $3, $4, $5)
+     RETURNING id`,
+    [input.namaTestCase, input.sprint ?? null, input.jiraUrl ?? null, input.namaMenu, input.createdBy],
   );
-  return rows[0];
+  const { rows: full } = await pool.query(`${HEADER_SELECT} WHERE h.id = $1`, [rows[0].id]);
+  return full[0];
+}
+
+export async function deleteHeader(id: string): Promise<boolean> {
+  // ON DELETE CASCADE di FK test_case_items.header_id akan menghapus semua item di bawahnya juga.
+  const result = await pool.query('DELETE FROM test_case_headers WHERE id = $1', [id]);
+  return (result.rowCount ?? 0) > 0;
 }
 
 const ITEM_SELECT = `
@@ -30,7 +40,7 @@ const ITEM_SELECT = `
     i.feature_name AS "featureName", i.test_type AS "testType", i.scenario, i.steps,
     i.test_data AS "testData", i.expected_result AS "expectedResult", i.status,
     i.pic_qa AS "picQa", qa.full_name AS "picQaName",
-    i.test_date AS "testDate", i.note,
+    i.test_date::text AS "testDate", i.note,
     i.pic_dev AS "picDev", dev.full_name AS "picDevName", i.dev_area AS "devArea",
     i.created_at AS "createdAt", i.updated_at AS "updatedAt"
   FROM test_case_items i

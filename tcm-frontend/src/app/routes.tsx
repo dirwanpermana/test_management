@@ -3,6 +3,7 @@ import { PrivateRoute } from '../auth/PrivateRoute';
 import { AppLayout } from '../components/layout/AppLayout';
 import { LoginPage } from '../features/auth/LoginPage';
 import { TestCaseListPage } from '../features/test-cases/TestCaseListPage';
+import { TestCaseItemsPage } from '../features/test-cases/TestCaseItemsPage';
 import { BugListPage } from '../features/bugs/BugListPage';
 import { MonitoringDashboardPage } from '../features/monitoring/MonitoringDashboardPage';
 
@@ -15,6 +16,7 @@ export function AppRoutes() {
         <Route element={<AppLayout />}>
           <Route path="/" element={<Navigate to="/test-cases" replace />} />
           <Route path="/test-cases" element={<TestCaseListPage />} />
+          <Route path="/test-cases/:headerId" element={<TestCaseItemsPage />} />
           <Route path="/bugs" element={<BugListPage />} />
           <Route path="/monitoring" element={<MonitoringDashboardPage />} />
         </Route>

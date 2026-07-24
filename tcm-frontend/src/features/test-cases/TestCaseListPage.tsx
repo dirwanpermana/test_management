@@ -1,86 +1,121 @@
-import { useState } from 'react';
-import { useAuth } from '../../auth/useAuth';
+import { useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { RoleGuard } from '../../auth/RoleGuard';
 import { ConfirmDialog } from '../../components/ui/ConfirmDialog';
-import { TestCaseCreateForm } from './TestCaseCreateForm';
-import { TestCaseGrid } from './TestCaseGrid';
-import {
-  useCreateItem, useDeleteItem, useHeaders, useItems, useUpdateItem,
-} from './useTestCases';
-import type { TestCaseItem } from '../../types/entities';
+import { TestCaseHeaderFormModal } from './TestCaseHeaderFormModal';
+import { useDeleteHeader, useHeaders } from './useTestCases';
+import type { TestCaseHeader } from '../../types/entities';
 
 export function TestCaseListPage() {
-  const { user } = useAuth();
-  const readOnly = user?.role !== 'QA';
+  const navigate = useNavigate();
+  const { data: headers = [], isLoading } = useHeaders();
+  const deleteHeader = useDeleteHeader();
 
-  const { data: headers = [] } = useHeaders();
-  const [selectedHeaderId, setSelectedHeaderId] = useState<string | undefined>(undefined);
-  const activeHeaderId = selectedHeaderId ?? headers[0]?.id;
+  const [showForm, setShowForm] = useState(false);
+  const [search, setSearch] = useState('');
+  const [menuFilter, setMenuFilter] = useState('');
+  const [pendingDelete, setPendingDelete] = useState<TestCaseHeader | null>(null);
 
-  const { data: items = [], isLoading } = useItems(activeHeaderId);
-  const createItem = useCreateItem(activeHeaderId ?? '');
-  const updateItem = useUpdateItem();
-  const deleteItem = useDeleteItem();
-  const [pendingDelete, setPendingDelete] = useState<TestCaseItem | null>(null);
+  const menuOptions = useMemo(
+    () => Array.from(new Set(headers.map((h) => h.namaMenu))).sort(),
+    [headers],
+  );
 
-  function handleAddRow() {
-    if (!activeHeaderId) return;
-    createItem.mutate({
-      featureName: '',
-      testType: 'Positive',
-      scenario: '',
-      steps: '',
-      expectedResult: '',
-      status: 'Not Executed',
+  const filteredHeaders = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return headers.filter((h) => {
+      const matchesSearch = !q
+        || h.namaTestCase.toLowerCase().includes(q)
+        || h.headerCode.toLowerCase().includes(q);
+      const matchesMenu = !menuFilter || h.namaMenu === menuFilter;
+      return matchesSearch && matchesMenu;
     });
-  }
+  }, [headers, search, menuFilter]);
 
   return (
     <div className="page">
       <h1>Test Case</h1>
 
-      <RoleGuard allow={['QA']}>
-        <TestCaseCreateForm onCreated={(id) => setSelectedHeaderId(id)} />
-      </RoleGuard>
-
       <div className="card">
         <div className="toolbar">
-          <label>Suite / Header:</label>
-          <select
-            value={activeHeaderId ?? ''}
-            onChange={(e) => setSelectedHeaderId(e.target.value)}
-          >
-            {headers.map((h) => (
-              <option key={h.id} value={h.id}>
-                {h.headerCode} — {h.namaTestCase} ({h.namaMenu})
-              </option>
+          <input
+            className="search-input"
+            placeholder="Cari ID atau nama test case..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+          <select value={menuFilter} onChange={(e) => setMenuFilter(e.target.value)}>
+            <option value="">Semua Menu</option>
+            {menuOptions.map((m) => (
+              <option key={m} value={m}>{m}</option>
             ))}
           </select>
-
           <RoleGuard allow={['QA']}>
-            <button onClick={handleAddRow} disabled={!activeHeaderId}>+ Tambah Baris</button>
+            <button onClick={() => setShowForm(true)}>+ Tambah Test Case</button>
           </RoleGuard>
         </div>
 
         {isLoading ? (
           <p>Memuat data...</p>
         ) : (
-          <TestCaseGrid
-            rows={items}
-            readOnly={readOnly}
-            onCellChanged={(row) => updateItem.mutate({ id: row.id, payload: row })}
-            onDelete={(row) => setPendingDelete(row)}
-          />
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>Action</th>
+                <th>ID Test Case</th>
+                <th>Nama Test Case</th>
+                <th>Sprint</th>
+                <th>Nama Menu</th>
+                <th>Jira URL</th>
+                <th>Create By</th>
+                <th>Create Date</th>
+                <th>Update Date</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filteredHeaders.map((h) => (
+                <tr key={h.id}>
+                  <td className="action-cell">
+                    <button className="btn-link" onClick={() => navigate(`/test-cases/${h.id}`)}>Edit</button>
+                    <RoleGuard allow={['QA']}>
+                      <button className="btn-link btn-link-danger" onClick={() => setPendingDelete(h)}>Hapus</button>
+                    </RoleGuard>
+                  </td>
+                  <td>{h.headerCode}</td>
+                  <td>{h.namaTestCase}</td>
+                  <td>{h.sprint || '-'}</td>
+                  <td>{h.namaMenu}</td>
+                  <td>{h.jiraUrl ? <a href={h.jiraUrl} target="_blank" rel="noreferrer">Link</a> : '-'}</td>
+                  <td>{h.createdByName ?? h.createdBy}</td>
+                  <td>{new Date(h.createdAt).toLocaleString('id-ID')}</td>
+                  <td>{h.updatedAt ? new Date(h.updatedAt).toLocaleString('id-ID') : '-'}</td>
+                </tr>
+              ))}
+              {filteredHeaders.length === 0 && (
+                <tr><td colSpan={9} className="muted">Tidak ada test case ditemukan.</td></tr>
+              )}
+            </tbody>
+          </table>
         )}
       </div>
 
+      {showForm && (
+        <TestCaseHeaderFormModal
+          onClose={() => setShowForm(false)}
+          onCreated={(id) => {
+            setShowForm(false);
+            navigate(`/test-cases/${id}`);
+          }}
+        />
+      )}
+
       <ConfirmDialog
         open={!!pendingDelete}
-        title={`Hapus test case ${pendingDelete?.caseNo}?`}
-        description="Tindakan ini tidak bisa dibatalkan."
+        title={`Hapus test case ${pendingDelete?.headerCode}?`}
+        description="Semua baris test case di dalamnya akan ikut terhapus. Tindakan ini tidak bisa dibatalkan."
         onCancel={() => setPendingDelete(null)}
         onConfirm={async () => {
-          if (pendingDelete) await deleteItem.mutateAsync(pendingDelete.id);
+          if (pendingDelete) await deleteHeader.mutateAsync(pendingDelete.id);
           setPendingDelete(null);
         }}
       />

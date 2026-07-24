@@ -1,4 +1,5 @@
 import express from 'express';
+import path from 'node:path';
 import cors from 'cors';
 import 'dotenv/config';
 import { authRouter, usersRouter } from './routes/auth';
@@ -11,6 +12,7 @@ export function createApp() {
 
   app.use(cors({ origin: process.env.CORS_ORIGIN ?? 'http://localhost:5173' }));
   app.use(express.json());
+  app.use('/uploads', express.static(path.resolve(__dirname, '../uploads')));
 
   app.get('/health', (_req, res) => res.json({ status: 'ok' }));
 

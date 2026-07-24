@@ -7,10 +7,14 @@ export async function listHeaders(): Promise<TestCaseHeader[]> {
 }
 
 export async function createHeader(payload: {
-  namaTestCase: string; jiraUrl: string; namaMenu: string;
+  namaTestCase: string; sprint?: string; jiraUrl: string; namaMenu: string;
 }): Promise<TestCaseHeader> {
   const { data } = await axiosClient.post('/test-case-headers', payload);
   return data;
+}
+
+export async function deleteHeader(id: string): Promise<void> {
+  await axiosClient.delete(`/test-case-headers/${id}`);
 }
 
 export async function listItems(headerId?: string): Promise<TestCaseItem[]> {

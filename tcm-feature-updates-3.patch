@@ -1,0 +1,622 @@
+diff --git a/tcm-backend/src/services/bugService.ts b/tcm-backend/src/services/bugService.ts
+index 667d609..5e0eb99 100644
+--- a/tcm-backend/src/services/bugService.ts
++++ b/tcm-backend/src/services/bugService.ts
+@@ -121,12 +121,15 @@ export async function createBug(input: {
+   return getBugById(rows[0].id);
+ }
+ 
+-export async function isTransitionAllowed(fromStatus: string, toStatus: string, role: string) {
+-  const { rows } = await pool.query(
+-    'SELECT 1 FROM bug_status_transitions WHERE from_status = $1 AND to_status = $2 AND allowed_role = $3',
+-    [fromStatus, toStatus, role],
+-  );
+-  return rows.length > 0;
++// DEV hanya boleh mengubah status bug ke dua nilai ini. QA boleh mengubah ke status manapun.
++// Ini menggantikan pengecekan berbasis tabel bug_status_transitions (from->to->role) yang lama —
++// aturan sekarang murni berbasis role tujuan, tidak bergantung status asal.
++const DEV_ALLOWED_STATUSES = new Set(['Ready to Test', 'On Progress Dev']);
++
++export function isTransitionAllowed(_fromStatus: string, toStatus: string, role: string): boolean {
++  if (role === 'QA') return true;
++  if (role === 'DEV') return DEV_ALLOWED_STATUSES.has(toStatus);
++  return false;
+ }
+ 
+ export async function changeStatus(id: string, toStatus: string, changedBy: string) {
+diff --git a/tcm-backend/src/services/testCaseService.ts b/tcm-backend/src/services/testCaseService.ts
+index a3917c8..46fb1d2 100644
+--- a/tcm-backend/src/services/testCaseService.ts
++++ b/tcm-backend/src/services/testCaseService.ts
+@@ -40,7 +40,7 @@ const ITEM_SELECT = `
+     i.feature_name AS "featureName", i.test_type AS "testType", i.scenario, i.steps,
+     i.test_data AS "testData", i.expected_result AS "expectedResult", i.status,
+     i.pic_qa AS "picQa", qa.full_name AS "picQaName",
+-    i.test_date AS "testDate", i.note,
++    i.test_date::text AS "testDate", i.note,
+     i.pic_dev AS "picDev", dev.full_name AS "picDevName", i.dev_area AS "devArea",
+     i.created_at AS "createdAt", i.updated_at AS "updatedAt"
+   FROM test_case_items i
+diff --git a/tcm-backend/src/test/smoke.ts b/tcm-backend/src/test/smoke.ts
+index 4330991..822d278 100644
+--- a/tcm-backend/src/test/smoke.ts
++++ b/tcm-backend/src/test/smoke.ts
+@@ -126,35 +126,35 @@ async function main() {
+   check('Default priority is Medium', bugRes.body.priority === 'Medium', bugRes.body.priority);
+   const bugId = bugRes.body.id;
+ 
+-  const qaTransitionForbidden = await request(app)
++  const devInvalidStatus = await request(app)
+     .patch(`/api/bugs/${bugId}/status`)
+-    .set('Authorization', `Bearer ${qaToken}`)
+-    .send({ status: 'On Progress Dev' });
+-  check('QA changing Open -> On Progress Dev returns 403 (only DEV allowed)', qaTransitionForbidden.status === 403);
++    .set('Authorization', `Bearer ${devToken}`)
++    .send({ status: 'Close' });
++  check('DEV changing to Close returns 403 (DEV hanya boleh Ready to Test / On Progress Dev)', devInvalidStatus.status === 403);
+ 
+   const devStartOk = await request(app)
+     .patch(`/api/bugs/${bugId}/status`)
+     .set('Authorization', `Bearer ${devToken}`)
+     .send({ status: 'On Progress Dev' });
+-  check('DEV changing Open -> On Progress Dev returns 200', devStartOk.status === 200, devStartOk.body);
+-
+-  const devReadyOk = await request(app)
+-    .patch(`/api/bugs/${bugId}/status`)
+-    .set('Authorization', `Bearer ${devToken}`)
+-    .send({ status: 'Ready to Test' });
+-  check('DEV changing On Progress Dev -> Ready to Test returns 200', devReadyOk.status === 200, devReadyOk.body);
++  check('DEV changing to On Progress Dev returns 200', devStartOk.status === 200, devStartOk.body);
+ 
+-  const devSkipForbidden = await request(app)
++  const qaJumpToHold = await request(app)
+     .patch(`/api/bugs/${bugId}/status`)
+-    .set('Authorization', `Bearer ${devToken}`)
+-    .send({ status: 'Close' });
+-  check('DEV closing bug returns 403 (only QA allowed)', devSkipForbidden.status === 403);
++    .set('Authorization', `Bearer ${qaToken}`)
++    .send({ status: 'Hold' });
++  check('QA changing to Hold returns 200 (QA boleh status manapun)', qaJumpToHold.status === 200, qaJumpToHold.body);
+ 
+   const qaRetestOk = await request(app)
+     .patch(`/api/bugs/${bugId}/status`)
+     .set('Authorization', `Bearer ${qaToken}`)
+     .send({ status: 'On Progress QA' });
+-  check('QA changing Ready to Test -> On Progress QA returns 200', qaRetestOk.status === 200, qaRetestOk.body);
++  check('QA changing to On Progress QA returns 200', qaRetestOk.status === 200, qaRetestOk.body);
++
++  const devReopenForbidden = await request(app)
++    .patch(`/api/bugs/${bugId}/status`)
++    .set('Authorization', `Bearer ${devToken}`)
++    .send({ status: 'Reopen' });
++  check('DEV changing to Reopen returns 403 (di luar 2 status yang diizinkan untuk DEV)', devReopenForbidden.status === 403);
+ 
+   const qaCloseOk = await request(app)
+     .patch(`/api/bugs/${bugId}/status`)
+@@ -178,7 +178,7 @@ async function main() {
+     .get(`/api/bugs/${bugId}`)
+     .set('Authorization', `Bearer ${qaToken}`);
+   check(
+-    'Bug status history has 5 entries (Open, On Progress Dev, Ready to Test, On Progress QA, Close)',
++    'Bug status history has 5 entries (Open, On Progress Dev, Hold, On Progress QA, Close)',
+     bugDetail.body.history?.length === 5,
+     bugDetail.body.history,
+   );
+diff --git a/tcm-frontend/src/components/ui/SearchableSelect.tsx b/tcm-frontend/src/components/ui/SearchableSelect.tsx
+new file mode 100644
+index 0000000..580afc5
+--- /dev/null
++++ b/tcm-frontend/src/components/ui/SearchableSelect.tsx
+@@ -0,0 +1,59 @@
++import { useEffect, useRef, useState } from 'react';
++
++export interface SearchableSelectOption {
++  value: string;
++  label: string;
++}
++
++interface SearchableSelectProps {
++  options: SearchableSelectOption[];
++  value: string;
++  onChange: (value: string) => void;
++  placeholder?: string;
++}
++
++export function SearchableSelect({ options, value, onChange, placeholder }: SearchableSelectProps) {
++  const [query, setQuery] = useState('');
++  const [open, setOpen] = useState(false);
++  const containerRef = useRef<HTMLDivElement>(null);
++
++  const selected = options.find((o) => o.value === value);
++
++  useEffect(() => {
++    function handleClickOutside(e: MouseEvent) {
++      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
++        setOpen(false);
++      }
++    }
++    document.addEventListener('mousedown', handleClickOutside);
++    return () => document.removeEventListener('mousedown', handleClickOutside);
++  }, []);
++
++  const filtered = options.filter((o) => o.label.toLowerCase().includes(query.toLowerCase()));
++
++  return (
++    <div className="searchable-select" ref={containerRef}>
++      <input
++        value={open ? query : (selected?.label ?? '')}
++        onChange={(e) => { setQuery(e.target.value); setOpen(true); }}
++        onFocus={() => { setQuery(''); setOpen(true); }}
++        placeholder={placeholder}
++        autoComplete="off"
++      />
++      {open && (
++        <ul className="searchable-select-list">
++          {filtered.length === 0 && <li className="searchable-select-empty">Tidak ada hasil</li>}
++          {filtered.map((o) => (
++            <li
++              key={o.value}
++              className={o.value === value ? 'active' : ''}
++              onClick={() => { onChange(o.value); setQuery(''); setOpen(false); }}
++            >
++              {o.label}
++            </li>
++          ))}
++        </ul>
++      )}
++    </div>
++  );
++}
+diff --git a/tcm-frontend/src/constants/bugWorkflow.ts b/tcm-frontend/src/constants/bugWorkflow.ts
+index 2fda121..7ef3914 100644
+--- a/tcm-frontend/src/constants/bugWorkflow.ts
++++ b/tcm-frontend/src/constants/bugWorkflow.ts
+@@ -1,41 +1,17 @@
+ import type { BugStatus, Role } from '../types/entities';
+ 
+-export interface BugStatusTransition {
+-  from: BugStatus;
+-  to: BugStatus;
+-  role: Role;
+-  label: string;
+-}
+-
+-/**
+- * State machine untuk status bug.
+- *
+- * ASUMSI (perlu dikonfirmasi ke stakeholder, sama seperti asumsi lain di
+- * rancangan-tcm-system.md): urutan alur dirancang sebagai
+- *   Open -> On Progress Dev -> Ready to Test -> On Progress QA -> Close
+- *                                                              -> Reopen -> On Progress Dev (ulang)
+- *   Open -> Hold / Take Out (untuk bug yang ditunda atau invalid/duplikat)
+- *   Hold -> Open (lanjutkan lagi)
+- *
+- * Backend WAJIB memvalidasi transisi ini juga (lihat pola
+- * `bug_status_transitions` di rancangan-tcm-system.md) — daftar di sini
+- * hanya mengontrol tombol mana yang tampil di UI (UX), bukan enforcement
+- * sesungguhnya.
+- */
+-export const BUG_STATUS_TRANSITIONS: BugStatusTransition[] = [
+-  { from: 'Open', to: 'On Progress Dev', role: 'DEV', label: 'Mulai Dikerjakan (On Progress Dev)' },
+-  { from: 'Open', to: 'Hold', role: 'QA', label: 'Hold' },
+-  { from: 'Open', to: 'Take Out', role: 'QA', label: 'Take Out' },
+-  { from: 'On Progress Dev', to: 'Ready to Test', role: 'DEV', label: 'Ready to Test' },
+-  { from: 'On Progress Dev', to: 'Hold', role: 'DEV', label: 'Hold' },
+-  { from: 'Ready to Test', to: 'On Progress QA', role: 'QA', label: 'Mulai Retest (On Progress QA)' },
+-  { from: 'On Progress QA', to: 'Close', role: 'QA', label: 'Tandai Close (lolos retest)' },
+-  { from: 'On Progress QA', to: 'Reopen', role: 'QA', label: 'Reopen (gagal retest)' },
+-  { from: 'Reopen', to: 'On Progress Dev', role: 'DEV', label: 'Mulai Dikerjakan Ulang' },
+-  { from: 'Hold', to: 'Open', role: 'QA', label: 'Lanjutkan (Unhold)' },
++export const ALL_BUG_STATUSES: BugStatus[] = [
++  'Open', 'On Progress Dev', 'Ready to Test', 'On Progress QA',
++  'Reopen', 'Close', 'Take Out', 'Hold',
+ ];
+ 
+-export function availableTransitions(status: BugStatus, role?: Role): BugStatusTransition[] {
+-  if (!role) return [];
+-  return BUG_STATUS_TRANSITIONS.filter((t) => t.from === status && t.role === role);
++// DEV hanya boleh mengubah status ke dua nilai ini. QA boleh ke status manapun.
++// Backend WAJIB memvalidasi aturan yang sama (lihat bugService.isTransitionAllowed) —
++// daftar di sini hanya mengontrol opsi mana yang tampil di UI, bukan enforcement sesungguhnya.
++const DEV_ALLOWED_STATUSES: BugStatus[] = ['Ready to Test', 'On Progress Dev'];
++
++export function allowedStatusesForRole(role?: Role): BugStatus[] {
++  if (role === 'QA') return ALL_BUG_STATUSES;
++  if (role === 'DEV') return DEV_ALLOWED_STATUSES;
++  return [];
+ }
+diff --git a/tcm-frontend/src/features/bugs/BugCreateForm.tsx b/tcm-frontend/src/features/bugs/BugCreateForm.tsx
+index ecd3bf4..3c358b7 100644
+--- a/tcm-frontend/src/features/bugs/BugCreateForm.tsx
++++ b/tcm-frontend/src/features/bugs/BugCreateForm.tsx
+@@ -1,14 +1,27 @@
+-import { useState, type FormEvent } from 'react';
++import { useMemo, useState, type FormEvent } from 'react';
+ import { useAuth } from '../../auth/useAuth';
++import { SearchableSelect } from '../../components/ui/SearchableSelect';
++import { useHeaders, useItems } from '../test-cases/useTestCases';
+ import { useCreateBug, useDevUsers, useUploadAttachment } from './useBugs';
+ import type { Priority, Severity } from '../../types/entities';
+ 
+ export function BugCreateForm({ onCreated }: { onCreated: () => void }) {
+   const { user } = useAuth();
+   const { data: devUsers = [] } = useDevUsers();
++  const { data: allItems = [] } = useItems();
++  const { data: headers = [] } = useHeaders();
+   const createBug = useCreateBug();
+   const uploadAttachment = useUploadAttachment();
+ 
++  const testCaseOptions = useMemo(() => allItems.map((item) => {
++    const header = headers.find((h) => h.id === item.headerId);
++    const namaFitur = item.featureName || '(belum diisi)';
++    return {
++      value: item.caseNo,
++      label: `${item.caseNo} — ${namaFitur}${header ? ` · ${header.namaTestCase}` : ''}`,
++    };
++  }), [allItems, headers]);
++
+   const [testCaseNo, setTestCaseNo] = useState('');
+   const [scenario, setScenario] = useState('');
+   const [stepsToReproduce, setStepsToReproduce] = useState('');
+@@ -57,11 +70,11 @@ export function BugCreateForm({ onCreated }: { onCreated: () => void }) {
+       </div>
+       <div className="field">
+         <label>ID Test Case</label>
+-        <input
++        <SearchableSelect
++          options={testCaseOptions}
+           value={testCaseNo}
+-          onChange={(e) => setTestCaseNo(e.target.value)}
+-          placeholder="260722-01"
+-          required
++          onChange={setTestCaseNo}
++          placeholder="Cari ID atau nama test case..."
+         />
+       </div>
+       <div className="field">
+diff --git a/tcm-frontend/src/features/bugs/BugDetailDrawer.tsx b/tcm-frontend/src/features/bugs/BugDetailDrawer.tsx
+index d2efb70..f1e94e1 100644
+--- a/tcm-frontend/src/features/bugs/BugDetailDrawer.tsx
++++ b/tcm-frontend/src/features/bugs/BugDetailDrawer.tsx
+@@ -1,7 +1,7 @@
+-import { useState, type FormEvent } from 'react';
++import { useEffect, useState, type FormEvent } from 'react';
+ import { useAuth } from '../../auth/useAuth';
+ import { StatusBadge } from '../../components/ui/StatusBadge';
+-import { availableTransitions } from '../../constants/bugWorkflow';
++import { allowedStatusesForRole } from '../../constants/bugWorkflow';
+ import { useAddComment, useBugDetail, useChangeBugStatus } from './useBugs';
+ import type { BugStatus } from '../../types/entities';
+ 
+@@ -12,16 +12,13 @@ export function BugDetailDrawer({ bugId, onClose }: { bugId: string; onClose: ()
+   const addComment = useAddComment();
+   const [comment, setComment] = useState('');
+   const [statusError, setStatusError] = useState<string | null>(null);
++  const [selectedStatus, setSelectedStatus] = useState<BugStatus | ''>('');
+ 
+-  async function handleChangeStatus(status: BugStatus) {
+-    setStatusError(null);
+-    try {
+-      await changeStatus.mutateAsync({ id: bugId, status });
+-    } catch (err) {
+-      const message = (err as { response?: { data?: { message?: string } } })?.response?.data?.message;
+-      setStatusError(message ?? 'Gagal mengubah status');
+-    }
+-  }
++  // Sinkronkan pilihan dropdown dengan status terkini setiap kali data bug berubah
++  // (misal setelah berhasil disimpan, atau saat pertama kali dimuat).
++  useEffect(() => {
++    if (data) setSelectedStatus(data.bug.status);
++  }, [data]);
+ 
+   async function handleAddComment(e: FormEvent) {
+     e.preventDefault();
+@@ -30,7 +27,18 @@ export function BugDetailDrawer({ bugId, onClose }: { bugId: string; onClose: ()
+     setComment('');
+   }
+ 
+-  const availableActions = data ? availableTransitions(data.bug.status, user?.role) : [];
++  async function handleSaveStatus() {
++    if (!data || !selectedStatus || selectedStatus === data.bug.status) return;
++    setStatusError(null);
++    try {
++      await changeStatus.mutateAsync({ id: bugId, status: selectedStatus });
++    } catch (err) {
++      const message = (err as { response?: { data?: { message?: string } } })?.response?.data?.message;
++      setStatusError(message ?? 'Gagal mengubah status');
++    }
++  }
++
++  const statusOptions = allowedStatusesForRole(user?.role);
+ 
+   return (
+     <div className="modal-overlay" onClick={onClose}>
+@@ -66,22 +74,6 @@ export function BugDetailDrawer({ bugId, onClose }: { bugId: string; onClose: ()
+               ))}
+             </ul>
+ 
+-            <div className="status-actions">
+-              {availableActions.map((action) => (
+-                <button
+-                  key={action.to}
+-                  className={['Reopen', 'Hold', 'Take Out'].includes(action.to) ? 'btn-secondary' : ''}
+-                  onClick={() => handleChangeStatus(action.to)}
+-                >
+-                  {action.label}
+-                </button>
+-              ))}
+-              {availableActions.length === 0 && (
+-                <span className="muted">Tidak ada aksi status untuk role Anda saat ini.</span>
+-              )}
+-            </div>
+-            {statusError && <div className="error-text">{statusError}</div>}
+-
+             <h3>Komentar</h3>
+             <div className="comment-list">
+               {data.comments.length === 0 && <p className="muted">Belum ada komentar.</p>}
+@@ -101,6 +93,31 @@ export function BugDetailDrawer({ bugId, onClose }: { bugId: string; onClose: ()
+               <button type="submit">Kirim</button>
+             </form>
+ 
++            <div className="status-change-row">
++              <div className="status-change-label">
++                <h3>Ubah Status</h3>
++                {statusOptions.length === 0 && (
++                  <span className="muted">Role Anda tidak bisa mengubah status bug.</span>
++                )}
++              </div>
++              {statusOptions.length > 0 && (
++                <div className="status-change-controls">
++                  <select
++                    value={selectedStatus || data.bug.status}
++                    onChange={(e) => setSelectedStatus(e.target.value as BugStatus)}
++                  >
++                    {statusOptions.map((s) => (
++                      <option key={s} value={s}>{s}</option>
++                    ))}
++                  </select>
++                  <button onClick={handleSaveStatus} disabled={changeStatus.isPending}>
++                    {changeStatus.isPending ? 'Menyimpan...' : 'Simpan'}
++                  </button>
++                </div>
++              )}
++              {statusError && <div className="error-text">{statusError}</div>}
++            </div>
++
+             <h3>Riwayat Status</h3>
+             <ul className="history-list">
+               {data.history.map((h) => (
+diff --git a/tcm-frontend/src/features/bugs/BugListPage.tsx b/tcm-frontend/src/features/bugs/BugListPage.tsx
+index d81ec12..3289f01 100644
+--- a/tcm-frontend/src/features/bugs/BugListPage.tsx
++++ b/tcm-frontend/src/features/bugs/BugListPage.tsx
+@@ -36,6 +36,7 @@ export function BugListPage() {
+                 <th>Priority</th>
+                 <th>Status</th>
+                 <th>Assign to</th>
++                <th>Create Date</th>
+                 <th></th>
+               </tr>
+             </thead>
+@@ -50,11 +51,12 @@ export function BugListPage() {
+                   <td><StatusBadge status={b.priority} /></td>
+                   <td><StatusBadge status={b.status} /></td>
+                   <td>{b.assignedToName ?? '-'}</td>
++                  <td>{new Date(b.createdAt).toLocaleString('id-ID')}</td>
+                   <td><button className="btn-link" onClick={() => setActiveBugId(b.id)}>Detail</button></td>
+                 </tr>
+               ))}
+               {bugs.length === 0 && (
+-                <tr><td colSpan={9} className="muted">Belum ada bug tercatat.</td></tr>
++                <tr><td colSpan={10} className="muted">Belum ada bug tercatat.</td></tr>
+               )}
+             </tbody>
+           </table>
+diff --git a/tcm-frontend/src/features/test-cases/TestCaseGrid.tsx b/tcm-frontend/src/features/test-cases/TestCaseGrid.tsx
+index 42fa903..b759798 100644
+--- a/tcm-frontend/src/features/test-cases/TestCaseGrid.tsx
++++ b/tcm-frontend/src/features/test-cases/TestCaseGrid.tsx
+@@ -7,6 +7,13 @@ import type { TestCaseItem } from '../../types/entities';
+ 
+ ModuleRegistry.registerModules([AllCommunityModule]);
+ 
++// Tema Excel-like: garis pembatas antar kolom & baris ditampilkan eksplisit.
++const gridTheme = themeQuartz.withParams({
++  columnBorder: true,
++  rowBorder: true,
++  wrapperBorder: true,
++});
++
+ interface TestCaseGridProps {
+   rows: TestCaseItem[];
+   readOnly: boolean;
+@@ -26,10 +33,17 @@ export function TestCaseGrid({ rows, readOnly, onCellChanged, onDelete }: TestCa
+         width: 120,
+         cellEditor: 'agSelectCellEditor',
+         cellEditorParams: { values: ['Positive', 'Negative'] },
++        // PENTING: cellRenderer harus mengembalikan DOM element, bukan string HTML —
++        // ag-Grid menganggap string sebagai teks polos (di-escape), jadi tag <span>
++        // yang dikembalikan sebagai string akan tampil literal, bukan ter-render.
+         cellRenderer: (params: { value?: string }) => {
+-          if (!params.value) return '';
+-          const color = params.value === 'Negative' ? '#dc2626' : '#16a34a';
+-          return `<span style="color:${color};font-weight:600;">${params.value}</span>`;
++          const span = document.createElement('span');
++          if (params.value) {
++            span.textContent = params.value;
++            span.style.color = params.value === 'Negative' ? '#dc2626' : '#16a34a';
++            span.style.fontWeight = '600';
++          }
++          return span;
+         },
+       },
+       { field: 'scenario', headerName: 'Scenario', editable: !readOnly, flex: 2, minWidth: 200 },
+@@ -53,8 +67,14 @@ export function TestCaseGrid({ rows, readOnly, onCellChanged, onDelete }: TestCa
+     if (!readOnly) {
+       base.push({
+         headerName: '',
+-        width: 90,
+-        cellRenderer: () => '<button class="grid-delete-btn">Hapus</button>',
++        width: 100,
++        cellRenderer: () => {
++          const button = document.createElement('button');
++          button.type = 'button';
++          button.className = 'grid-delete-btn';
++          button.textContent = 'Hapus';
++          return button;
++        },
+         onCellClicked: (event) => onDelete(event.data as TestCaseItem),
+       });
+     }
+@@ -66,9 +86,9 @@ export function TestCaseGrid({ rows, readOnly, onCellChanged, onDelete }: TestCa
+   }
+ 
+   return (
+-    <div style={{ height: 520, width: '100%' }}>
++    <div className="test-case-grid-wrapper">
+       <AgGridReact<TestCaseItem>
+-        theme={themeQuartz}
++        theme={gridTheme}
+         rowData={rows}
+         columnDefs={columnDefs}
+         onCellValueChanged={handleCellValueChanged}
+diff --git a/tcm-frontend/src/features/test-cases/TestCaseItemsPage.tsx b/tcm-frontend/src/features/test-cases/TestCaseItemsPage.tsx
+index 9fab023..5f3f4bf 100644
+--- a/tcm-frontend/src/features/test-cases/TestCaseItemsPage.tsx
++++ b/tcm-frontend/src/features/test-cases/TestCaseItemsPage.tsx
+@@ -1,4 +1,4 @@
+-import { useState } from 'react';
++import { useEffect, useRef, useState } from 'react';
+ import { useNavigate, useParams } from 'react-router-dom';
+ import { useAuth } from '../../auth/useAuth';
+ import { RoleGuard } from '../../auth/RoleGuard';
+@@ -9,6 +9,21 @@ import {
+ } from './useTestCases';
+ import type { TestCaseItem } from '../../types/entities';
+ 
++const DEFAULT_ROW_COUNT = 10;
++
++function blankRowPayload() {
++  return {
++    featureName: '',
++    testType: 'Positive' as const,
++    scenario: '',
++    steps: '',
++    expectedResult: '',
++    status: 'Not Executed' as const,
++    // "test date tidak perlu ada waktunya" — hanya tanggal (YYYY-MM-DD), tanpa jam.
++    testDate: new Date().toISOString().slice(0, 10),
++  };
++}
++
+ export function TestCaseItemsPage() {
+   const { headerId } = useParams<{ headerId: string }>();
+   const navigate = useNavigate();
+@@ -24,18 +39,29 @@ export function TestCaseItemsPage() {
+   const deleteItem = useDeleteItem();
+   const [pendingDelete, setPendingDelete] = useState<TestCaseItem | null>(null);
+ 
++  // Header baru (belum ada baris sama sekali) langsung diisi 10 baris kosong,
++  // meniru template Excel siap-isi, supaya QA tidak perlu klik "+ Tambah Baris" berulang.
++  const seededHeaderRef = useRef<string | null>(null);
++  useEffect(() => {
++    if (isLoading || !headerId || readOnly) return;
++    if (items.length > 0) return;
++    if (seededHeaderRef.current === headerId) return;
++    seededHeaderRef.current = headerId;
++
++    (async () => {
++      for (let i = 0; i < DEFAULT_ROW_COUNT; i += 1) {
++        // Sengaja sekuensial (bukan Promise.all) supaya seq_no/case_no dari trigger
++        // PostgreSQL tetap berurutan, bukan race condition antar insert paralel.
++        // eslint-disable-next-line no-await-in-loop
++        await createItem.mutateAsync(blankRowPayload());
++      }
++    })();
++    // eslint-disable-next-line react-hooks/exhaustive-deps
++  }, [headerId, isLoading, items.length, readOnly]);
++
+   function handleAddRow() {
+     if (!headerId) return;
+-    createItem.mutate({
+-      featureName: '',
+-      testType: 'Positive',
+-      scenario: '',
+-      steps: '',
+-      expectedResult: '',
+-      status: 'Not Executed',
+-      // "tanggal otomatis date time" — diisi otomatis saat baris dibuat, tetap bisa disunting QA kalau perlu koreksi
+-      testDate: new Date().toISOString(),
+-    });
++    createItem.mutate(blankRowPayload());
+   }
+ 
+   return (
+diff --git a/tcm-frontend/src/index.css b/tcm-frontend/src/index.css
+index eee97f2..ad2a41f 100644
+--- a/tcm-frontend/src/index.css
++++ b/tcm-frontend/src/index.css
+@@ -90,6 +90,8 @@ textarea { min-height: 60px; font-family: inherit; }
+   background: #fee2e2; color: #dc2626; border: none; border-radius: 4px; padding: 4px 8px; font-size: 12px; cursor: pointer;
+ }
+ 
++.test-case-grid-wrapper { height: calc(100vh - 320px); min-height: 420px; width: 100%; }
++
+ .modal-overlay {
+   position: fixed; inset: 0; background: rgba(0,0,0,.4);
+   display: flex; align-items: center; justify-content: center; z-index: 50;
+@@ -105,10 +107,30 @@ textarea { min-height: 60px; font-family: inherit; }
+ .attachment-list { list-style: none; padding: 0; margin: 8px 0; font-size: 13px; }
+ .attachment-list li { padding: 4px 0; }
+ 
++.searchable-select { position: relative; }
++.searchable-select-list {
++  position: absolute; z-index: 60; top: calc(100% + 4px); left: 0; right: 0;
++  background: #fff; border: 1px solid #d1d5db; border-radius: 6px;
++  max-height: 220px; overflow-y: auto; list-style: none; margin: 0; padding: 4px;
++  box-shadow: 0 6px 16px rgba(0,0,0,.12);
++}
++.searchable-select-list li {
++  padding: 8px 10px; border-radius: 4px; cursor: pointer; font-size: 13px;
++}
++.searchable-select-list li:hover { background: #eef2ff; }
++.searchable-select-list li.active { background: #e0e7ff; font-weight: 600; }
++.searchable-select-empty { color: #9ca3af; cursor: default !important; }
++.searchable-select-empty:hover { background: transparent !important; }
++
+ .drawer-card {
+   background: #fff; border-radius: 10px; padding: 24px; width: 560px; max-height: 90vh; overflow: auto;
+ }
+ .drawer-card-wide { width: 760px; max-width: 92vw; }
++.status-change-row { margin: 16px 0; padding: 12px; background: #f9fafb; border-radius: 8px; }
++.status-change-label { display: flex; align-items: center; justify-content: space-between; }
++.status-change-label h3 { margin: 0; }
++.status-change-controls { display: flex; gap: 10px; margin-top: 8px; }
++.status-change-controls select { width: auto; min-width: 220px; }
+ .drawer-close { float: right; background: #e5e7eb; color: #111827; }
+ .detail-list { display: grid; grid-template-columns: 140px 1fr; row-gap: 8px; margin: 16px 0; font-size: 14px; }
+ .detail-list dt { font-weight: 600; color: #6b7280; }
+diff --git a/tcm-frontend/src/mocks/handlers.ts b/tcm-frontend/src/mocks/handlers.ts
+index 08c38b5..9c9efed 100644
+--- a/tcm-frontend/src/mocks/handlers.ts
++++ b/tcm-frontend/src/mocks/handlers.ts
+@@ -3,7 +3,7 @@ import {
+   users, credentials, findUser, testCaseHeaders, testCaseItems, bugs, bugComments,
+   bugStatusHistory, dailyCounters, nextSeq, todayCode,
+ } from './seedData';
+-import { BUG_STATUS_TRANSITIONS } from '../constants/bugWorkflow';
++import { allowedStatusesForRole } from '../constants/bugWorkflow';
+ import type {
+   Role, TestCaseItem, TestCaseHeader, Bug, BugStatus,
+ } from '../types/entities';
+@@ -248,9 +248,7 @@ export const handlers = [
+     if (!bug) return HttpResponse.json({ message: 'Not found' }, { status: 404 });
+ 
+     const { status: toStatus } = (await request.json()) as { status: BugStatus };
+-    const allowed = BUG_STATUS_TRANSITIONS.some(
+-      (t) => t.from === bug.status && t.to === toStatus && t.role === auth.role,
+-    );
++    const allowed = allowedStatusesForRole(auth.role).includes(toStatus);
+     if (!allowed) {
+       return HttpResponse.json(
+         { message: `Transisi status '${bug.status}' -> '${toStatus}' tidak diizinkan untuk role ${auth.role}` },

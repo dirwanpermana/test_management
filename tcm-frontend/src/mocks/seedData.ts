@@ -47,10 +47,12 @@ export const testCaseHeaders: TestCaseHeader[] = [
     id: 'h-1',
     headerCode: todayCode(),
     namaTestCase: 'Login Module',
+    sprint: 'Sprint 1',
     jiraUrl: 'https://jira.kopnus.com/browse/QA-101',
     namaMenu: 'Login',
     createdBy: 'u-qa-1',
     createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
   },
 ];
 
@@ -117,11 +119,5 @@ export const bugs: Bug[] = [];
 export const bugComments: BugComment[] = [];
 export const bugStatusHistory: BugStatusHistory[] = [];
 
-// Allowed transitions: from_status -> to_status -> allowed role
-export const bugStatusTransitions: Array<{ from: string; to: string; role: 'QA' | 'DEV' }> = [
-  { from: 'Open', to: 'Ready to Test', role: 'DEV' },
-  { from: 'Ready to Test', to: 'Reopen', role: 'QA' },
-  { from: 'Ready to Test', to: 'Closed', role: 'QA' },
-  { from: 'Reopen', to: 'Ready to Test', role: 'DEV' },
-  { from: 'Open', to: 'Rejected', role: 'QA' },
-];
+// Aturan transisi status bug sekarang ada di satu tempat: src/constants/bugWorkflow.ts
+// (dipakai bareng oleh UI dan mock handler ini, supaya tidak ada dua "sumber kebenaran").

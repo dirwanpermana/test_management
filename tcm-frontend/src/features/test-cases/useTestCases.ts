@@ -14,6 +14,14 @@ export function useCreateHeader() {
   });
 }
 
+export function useDeleteHeader() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.deleteHeader(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['test-case-headers'] }),
+  });
+}
+
 export function useItems(headerId?: string) {
   return useQuery({
     queryKey: ['test-case-items', headerId ?? 'all'],

@@ -121,32 +121,52 @@ async function main() {
       assignedTo: loginDev.body.user.id,
     });
   check('Create bug as QA returns 201', bugRes.status === 201, bugRes.body);
-  check('bug_no format is BUG-YYMMDD-NN', /^BUG-\d{6}-01$/.test(bugRes.body.bugNo), bugRes.body.bugNo);
+  check('bug_no format is BUG-YYMMDD-01', /^BUG-\d{6}-01$/.test(bugRes.body.bugNo), bugRes.body.bugNo);
+  check('Default severity is Medium', bugRes.body.severity === 'Medium', bugRes.body.severity);
+  check('Default priority is Medium', bugRes.body.priority === 'Medium', bugRes.body.priority);
   const bugId = bugRes.body.id;
 
-  const qaTransitionForbidden = await request(app)
+  const devInvalidStatus = await request(app)
+    .patch(`/api/bugs/${bugId}/status`)
+    .set('Authorization', `Bearer ${devToken}`)
+    .send({ status: 'Close' });
+  check('DEV changing to Close returns 403 (DEV hanya boleh Ready to Test / On Progress Dev)', devInvalidStatus.status === 403);
+
+  const devStartOk = await request(app)
+    .patch(`/api/bugs/${bugId}/status`)
+    .set('Authorization', `Bearer ${devToken}`)
+    .send({ status: 'On Progress Dev' });
+  check('DEV changing to On Progress Dev returns 200', devStartOk.status === 200, devStartOk.body);
+
+  const qaJumpToHold = await request(app)
     .patch(`/api/bugs/${bugId}/status`)
     .set('Authorization', `Bearer ${qaToken}`)
-    .send({ status: 'Ready to Test' });
-  check('QA changing Open -> Ready to Test returns 403 (only DEV allowed)', qaTransitionForbidden.status === 403);
+    .send({ status: 'Hold' });
+  check('QA changing to Hold returns 200 (QA boleh status manapun)', qaJumpToHold.status === 200, qaJumpToHold.body);
 
-  const devTransitionOk = await request(app)
+  const qaRetestOk = await request(app)
+    .patch(`/api/bugs/${bugId}/status`)
+    .set('Authorization', `Bearer ${qaToken}`)
+    .send({ status: 'On Progress QA' });
+  check('QA changing to On Progress QA returns 200', qaRetestOk.status === 200, qaRetestOk.body);
+
+  const devReopenForbidden = await request(app)
     .patch(`/api/bugs/${bugId}/status`)
     .set('Authorization', `Bearer ${devToken}`)
-    .send({ status: 'Ready to Test' });
-  check('DEV changing Open -> Ready to Test returns 200', devTransitionOk.status === 200, devTransitionOk.body);
-
-  const devCloseForbidden = await request(app)
-    .patch(`/api/bugs/${bugId}/status`)
-    .set('Authorization', `Bearer ${devToken}`)
-    .send({ status: 'Closed' });
-  check('DEV closing bug returns 403 (only QA allowed)', devCloseForbidden.status === 403);
+    .send({ status: 'Reopen' });
+  check('DEV changing to Reopen returns 403 (di luar 2 status yang diizinkan untuk DEV)', devReopenForbidden.status === 403);
 
   const qaCloseOk = await request(app)
     .patch(`/api/bugs/${bugId}/status`)
     .set('Authorization', `Bearer ${qaToken}`)
-    .send({ status: 'Closed' });
-  check('QA closing bug returns 200', qaCloseOk.status === 200 && qaCloseOk.body.status === 'Closed');
+    .send({ status: 'Close' });
+  check('QA closing bug returns 200', qaCloseOk.status === 200 && qaCloseOk.body.status === 'Close');
+
+  const attachmentRes = await request(app)
+    .post(`/api/bugs/${bugId}/attachments`)
+    .set('Authorization', `Bearer ${qaToken}`)
+    .attach('file', Buffer.from('dummy screenshot content'), 'screenshot.png');
+  check('Upload attachment returns 201 with fileName', attachmentRes.status === 201 && attachmentRes.body.fileName === 'screenshot.png', attachmentRes.body);
 
   const commentRes = await request(app)
     .post(`/api/bugs/${bugId}/comments`)
@@ -158,11 +178,12 @@ async function main() {
     .get(`/api/bugs/${bugId}`)
     .set('Authorization', `Bearer ${qaToken}`);
   check(
-    'Bug status history has 3 entries (Open, Ready to Test, Closed)',
-    bugDetail.body.history?.length === 3,
+    'Bug status history has 5 entries (Open, On Progress Dev, Hold, On Progress QA, Close)',
+    bugDetail.body.history?.length === 5,
     bugDetail.body.history,
   );
   check('Bug detail includes the comment', bugDetail.body.comments?.length === 1);
+  check('Bug detail includes the uploaded attachment', bugDetail.body.bug?.attachments?.length === 1, bugDetail.body.bug?.attachments);
 
   const monitoringTc = await request(app)
     .get('/api/monitoring/test-cases')
@@ -175,11 +196,27 @@ async function main() {
   const monitoringBug = await request(app)
     .get('/api/monitoring/bugs')
     .set('Authorization', `Bearer ${qaToken}`);
-  const bugRow = monitoringBug.body.find((r: any) => r.status === 'Closed');
-  check('Monitoring bug row for Closed status found', !!bugRow, monitoringBug.body);
+  const bugRow = monitoringBug.body.find((r: any) => r.status === 'Close');
+  check('Monitoring bug row for Close status found', !!bugRow, monitoringBug.body);
 
   const noAuth = await request(app).get('/api/bugs');
   check('Request without token returns 401', noAuth.status === 401);
+
+  const deleteHeaderForbidden = await request(app)
+    .delete(`/api/test-case-headers/${headerId}`)
+    .set('Authorization', `Bearer ${devToken}`);
+  check('DEV deleting test case header returns 403', deleteHeaderForbidden.status === 403);
+
+  const deleteHeaderOk = await request(app)
+    .delete(`/api/test-case-headers/${headerId}`)
+    .set('Authorization', `Bearer ${qaToken}`);
+  check('QA deleting test case header returns 204', deleteHeaderOk.status === 204);
+
+  const itemsAfterDelete = await request(app)
+    .get('/api/test-case-items')
+    .query({ headerId })
+    .set('Authorization', `Bearer ${qaToken}`);
+  check('Items under deleted header are cascade-deleted', itemsAfterDelete.body.length === 0, itemsAfterDelete.body);
 
   console.log(`\n--- Result: ${failures === 0 ? 'ALL PASSED' : `${failures} FAILURE(S)`} ---`);
 

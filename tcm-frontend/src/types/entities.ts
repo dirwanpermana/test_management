@@ -17,10 +17,13 @@ export interface TestCaseHeader {
   id: string;
   headerCode: string; // '260722'
   namaTestCase: string;
+  sprint?: string;
   jiraUrl: string;
   namaMenu: string;
   createdBy: string;
+  createdByName?: string;
   createdAt: string;
+  updatedAt?: string;
 }
 
 export type TestType = 'Positive' | 'Negative';
@@ -49,7 +52,18 @@ export interface TestCaseItem {
   updatedAt: string;
 }
 
-export type BugStatus = 'Open' | 'Ready to Test' | 'Reopen' | 'Closed' | 'Rejected';
+export type BugStatus =
+  | 'Open'
+  | 'On Progress Dev'
+  | 'Ready to Test'
+  | 'On Progress QA'
+  | 'Reopen'
+  | 'Close'
+  | 'Take Out'
+  | 'Hold';
+
+export type Severity = 'Critical' | 'Major' | 'Medium' | 'Low';
+export type Priority = 'Critical' | 'High' | 'Medium' | 'Low';
 
 export interface Attachment {
   id: string;
@@ -69,6 +83,8 @@ export interface Bug {
   expectedResult: string;
   actualResult: string;
   status: BugStatus;
+  severity: Severity;
+  priority: Priority;
   assignedTo?: string;
   assignedToName?: string;
   attachments: Attachment[];
