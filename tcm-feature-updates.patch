@@ -1105,7 +1105,7 @@ index 0000000..e45c6ef
 +      const header = await createHeader.mutateAsync({ namaTestCase, sprint, namaMenu, jiraUrl });
 +      onCreated(header.id);
 +    } catch {
-+      setError('Gagal menyimpan test case. Coba lagi.');
++      setError('Gagal menyimpan test case, Format URL jira tidak sesuai');
 +    }
 +  }
 +
@@ -1201,7 +1201,7 @@ index 0000000..9fab023
 +  return (
 +    <div className="page">
 +      <button className="btn-secondary mb-3" onClick={() => navigate('/test-cases')}>
-+        &larr; Kembali ke List Test Case
++        &larr; Back
 +      </button>
 +      <h1>{header ? `${header.headerCode} — ${header.namaTestCase}` : 'Test Case'}</h1>
 +      {header && (

@@ -5,6 +5,7 @@ import { ConfirmDialog } from '../../components/ui/ConfirmDialog';
 import { TestCaseHeaderFormModal } from './TestCaseHeaderFormModal';
 import { useDeleteHeader, useHeaders } from './useTestCases';
 import type { TestCaseHeader } from '../../types/entities';
+import { downloadTemplate } from '../../api/testCaseApi';
 
 export function TestCaseListPage() {
   const navigate = useNavigate();
@@ -52,6 +53,9 @@ export function TestCaseListPage() {
           </select>
           <RoleGuard allow={['QA']}>
             <button onClick={() => setShowForm(true)}>+ Tambah Test Case</button>
+           <button className="btn-secondary" onClick={() => downloadTemplate()}>
+             📥 Download Template
+           </button>
           </RoleGuard>
         </div>
 

@@ -55,3 +55,32 @@ export async function uploadCapture(itemId: string, file: File): Promise<TestCas
 export async function bulkUpdateItems(items: Array<{ id: string; payload: Partial<TestCaseItem> }>): Promise<void> {
   await axiosClient.put('/test-case-items/bulk', { items });
 }
+
+
+// excel
+export interface ImportResult {
+  inserted: number;
+  skipped: Array<{ rowNumber: number; message: string }>;
+}
+
+export async function importItems(headerId: string, file: File): Promise<ImportResult> {
+  const formData = new FormData();
+  formData.append('file', file);
+  const { data } = await axiosClient.post(`/test-case-headers/${headerId}/items/import`, formData, {
+    headers: { 'Content-Type': undefined },
+  });
+  return data;
+}
+
+// download template excel
+export async function downloadTemplate(): Promise<void> {
+  const response = await axiosClient.get('/test-case-headers/template', { responseType: 'blob' });
+  const url = window.URL.createObjectURL(new Blob([response.data]));
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = 'Test_Case_Template.xlsx';
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.URL.revokeObjectURL(url);
+}

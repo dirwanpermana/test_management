@@ -1,5 +1,5 @@
-import { useState, type FormEvent } from 'react';
-import { useCreateHeader } from './useTestCases';
+import { useRef, useState, type FormEvent } from 'react';
+import { useCreateHeader, useImportItems } from './useTestCases';
 
 interface Props {
   onClose: () => void;
@@ -8,20 +8,52 @@ interface Props {
 
 export function TestCaseHeaderFormModal({ onClose, onCreated }: Props) {
   const createHeader = useCreateHeader();
+  const importItems = useImportItems();
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
   const [namaTestCase, setNamaTestCase] = useState('');
   const [sprint, setSprint] = useState('');
   const [namaMenu, setNamaMenu] = useState('');
   const [jiraUrl, setJiraUrl] = useState('');
+  const [file, setFile] = useState<File | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [importSummary, setImportSummary] = useState<string | null>(null);
+
+  const isBusy = createHeader.isPending || importItems.isPending;
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setError(null);
+    setImportSummary(null);
     try {
       const header = await createHeader.mutateAsync({ namaTestCase, sprint, namaMenu, jiraUrl });
+
+      if (file) {
+        try {
+          const result = await importItems.mutateAsync({ headerId: header.id, file });
+          if (result.skipped.length > 0) {
+            const preview = result.skipped.slice(0, 3)
+              .map((s) => `baris ${s.rowNumber}: ${s.message}`)
+              .join('; ');
+            setImportSummary(
+              `${result.inserted} baris berhasil diimpor, ${result.skipped.length} baris dilewati (${preview}${result.skipped.length > 3 ? ', ...' : ''}).`,
+            );
+            // Header sudah terlanjur dibuat & sebagian data sudah masuk —
+            // tampilkan ringkasan dulu 2 detik sebelum pindah halaman, supaya
+            // pesan sempat terbaca.
+            setTimeout(() => onCreated(header.id), 2500);
+            return;
+          }
+        } catch {
+          setError('Test case berhasil dibuat, tapi import Excel gagal. Silakan isi manual atau coba import ulang dari halaman detail.');
+          onCreated(header.id);
+          return;
+        }
+      }
+
       onCreated(header.id);
     } catch {
-      setError('Gagal menyimpan test case. Coba lagi.');
+      setError('Gagal menyimpan test case, Format URL jira tidak sesuai');
     }
   }
 
@@ -32,7 +64,7 @@ export function TestCaseHeaderFormModal({ onClose, onCreated }: Props) {
 
         <div className="field">
           <label>ID Test Case</label>
-          <input value="Otomatis (YYMMDD)" disabled />
+          <input value="Otomatis" disabled />
         </div>
         <div className="field">
           <label>Nama Test Case</label>
@@ -56,12 +88,26 @@ export function TestCaseHeaderFormModal({ onClose, onCreated }: Props) {
           <input value={jiraUrl} onChange={(e) => setJiraUrl(e.target.value)} placeholder="https://jira..." />
         </div>
 
+        <div className="field">
+          <label>Upload Test Case (opsional)</label>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".xlsx,.xls"
+            onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+          />
+          <span className="muted-inline" style={{ marginTop: 4 }}>
+            Kolom yang diambil: Pastikan file Test case yang di upload sesuai template!
+          </span>
+        </div>
+
         {error && <div className="error-text">{error}</div>}
+        {importSummary && <div className="muted-inline">{importSummary}</div>}
 
         <div className="modal-actions">
-          <button type="button" className="btn-secondary" onClick={onClose}>Batal</button>
-          <button type="submit" disabled={createHeader.isPending}>
-            {createHeader.isPending ? 'Menyimpan...' : 'Simpan'}
+          <button type="button" className="btn-secondary" onClick={onClose} disabled={isBusy}>Batal</button>
+          <button type="submit" disabled={isBusy}>
+            {createHeader.isPending ? 'Menyimpan...' : importItems.isPending ? 'Mengimpor Excel...' : 'Simpan'}
           </button>
         </div>
       </form>

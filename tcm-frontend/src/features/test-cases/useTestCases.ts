@@ -86,3 +86,13 @@ export function useBulkUpdateItems() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['test-case-items'] }),
   });
 }
+
+
+// excel
+export function useImportItems() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ headerId, file }: { headerId: string; file: File }) => api.importItems(headerId, file),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['test-case-items'] }),
+  });
+}

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useAuth } from '../../auth/useAuth';
 import { RoleGuard } from '../../auth/RoleGuard';
@@ -25,6 +25,24 @@ function blankRowPayload() {
   };
 }
 
+// FIX Bug 3: whitelist field yang benar-benar editable sebelum dikirim ke
+// server. Mencegah field read-only/computed (displayNo, picQaName,
+// captureUrl, dst) ikut terkirim tanpa perlu — payload sudah bersih terlepas
+// dari fix .nullish() di backend.
+const EDITABLE_FIELDS = [
+  'featureName', 'testType', 'scenario', 'steps', 'testData',
+  'expectedResult', 'status', 'picQa', 'testDate', 'note', 'devArea',
+] as const;
+
+function pickEditableFields(row: TestCaseItem): Partial<TestCaseItem> {
+  const result: Partial<TestCaseItem> = {};
+  for (const key of EDITABLE_FIELDS) {
+    // @ts-expect-error indexing dinamis dari whitelist EDITABLE_FIELDS di atas, aman
+    result[key] = row[key];
+  }
+  return result;
+}
+
 export function TestCaseItemsPage() {
   const { headerId } = useParams<{ headerId: string }>();
   const navigate = useNavigate();
@@ -44,6 +62,23 @@ export function TestCaseItemsPage() {
 
   const dirtyRef = useRef<Map<string, TestCaseItem>>(new Map());
   const [dirtyCount, setDirtyCount] = useState(0);
+
+  // FIX Bug 2: gabungkan data server dengan perubahan lokal yang BELUM
+  // di-save. Tanpa ini, refetch dari aksi lain (upload capture, tambah
+  // baris — keduanya invalidate query 'test-case-items') akan menimpa grid
+const displayRows = useMemo(
+  () => items.map((item) => {
+    const dirty = dirtyRef.current.get(item.id);
+    if (!dirty) return item;
+    const overlay: Partial<TestCaseItem> = {};
+    for (const key of EDITABLE_FIELDS) {
+      (overlay as Record<string, unknown>)[key] = dirty[key];
+    }
+    return { ...item, ...overlay };
+  }),
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  [items, dirtyCount],
+);
 
   const seededHeaderRef = useRef<string | null>(null);
   useEffect(() => {
@@ -77,7 +112,10 @@ export function TestCaseItemsPage() {
   }
 
   async function handleSave() {
-    const payload = Array.from(dirtyRef.current.values()).map((row) => ({ id: row.id, payload: row }));
+    const payload = Array.from(dirtyRef.current.values()).map((row) => ({
+      id: row.id,
+      payload: pickEditableFields(row),
+    }));
     if (payload.length === 0) return;
     await bulkUpdate.mutateAsync(payload);
     dirtyRef.current.clear();
@@ -94,7 +132,7 @@ export function TestCaseItemsPage() {
       {header && <TestCaseHeaderEditableCard header={header} readOnly={readOnly} />}
 
       <button className="btn-secondary mb-3" onClick={handleBack}>
-        &larr; Kembali ke List Test Case
+        &larr; Back
       </button>
 
       <div className="card">
@@ -113,13 +151,12 @@ export function TestCaseItemsPage() {
           <p>Memuat data...</p>
         ) : (
           <TestCaseGrid
-            rows={items}
+            rows={displayRows}
             readOnly={readOnly}
             qaUsers={qaUsers}
             onRowDirty={handleRowDirty}
             onDelete={(row) => setPendingDelete(row)}
             onCaptureUpload={(row, file) => uploadCapture.mutate({ itemId: row.id, file })}
-            onAddRow={handleAddRow}
           />
         )}
       </div>

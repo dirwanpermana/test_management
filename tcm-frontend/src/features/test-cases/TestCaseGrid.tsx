@@ -1,8 +1,8 @@
-import { forwardRef, useImperativeHandle, useMemo, useRef, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { AgGridReact } from 'ag-grid-react';
 import {
   ModuleRegistry, AllCommunityModule, themeQuartz,
-  type ColDef, type CellValueChangedEvent, type ICellEditorParams,
+  type ColDef, type CellValueChangedEvent, type GetRowIdParams,
 } from 'ag-grid-community';
 import type { TestCaseItem } from '../../types/entities';
 import type { UserOption } from '../../api/userApi';
@@ -28,6 +28,33 @@ function TestTypeCell({ value }: { value?: string }) {
   return (
     <span style={{ color: value === 'Negative' ? '#dc2626' : '#16a34a', fontWeight: 600 }}>
       {value}
+    </span>
+  );
+}
+
+function CaseIdCell({ value }: { value: string }) {
+  const [copied, setCopied] = useState(false);
+
+  async function handleCopy() {
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1200);
+    } catch {
+      // Clipboard API butuh secure context (HTTPS/localhost) — di dev lokal
+      // aman. Kalau gagal (mis. permission diblokir), diamkan saja; teks
+      // tetap bisa di-select manual seperti biasa.
+    }
+  }
+
+  return (
+    <span
+      className={`case-id-cell${copied ? ' copied' : ''}`}
+      onClick={handleCopy}
+      title="Klik untuk salin"
+    >
+      <strong>{value}</strong>
+      <span className="case-id-copy-icon">{copied ? '✓ Tersalin' : '⧉'}</span>
     </span>
   );
 }
@@ -73,53 +100,35 @@ function CaptureCell({
   );
 }
 
-// Custom cell editor: auto-grow (maks ~70 karakter per baris) + Enter menambah baris baru.
-// Shift+Enter tetap bisa dipakai untuk baris baru DI DALAM sel yang sama.
-interface AutoGrowParams extends ICellEditorParams {
-  onEnterNewRow?: () => void;
-}
-
-const AutoGrowTextEditor = forwardRef((props: AutoGrowParams, ref) => {
-  const valueRef = useRef<string>(props.value ?? '');
-  const taRef = useRef<HTMLTextAreaElement>(null);
-
-  useImperativeHandle(ref, () => ({
-    getValue: () => valueRef.current,
-    isCancelBeforeStart: () => false,
-    isCancelAfterEnd: () => false,
-  }));
-
-  return (
-    <textarea
-      ref={taRef}
-      className="grid-autogrow-textarea"
-      autoFocus
-      defaultValue={valueRef.current}
-      rows={1}
-      onChange={(e) => { valueRef.current = e.target.value; }}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter' && !e.shiftKey) {
-          e.preventDefault();
-          props.api.stopEditing();
-          props.onEnterNewRow?.();
-        }
-      }}
-    />
-  );
-});
+// GANTI TOTAL: dari custom forwardRef editor -> editor BAWAAN ag-Grid
+// (agLargeTextCellEditor), dibuat resmi oleh tim ag-Grid persis untuk kasus
+// "textarea multi-baris di popup, tanpa batas karakter praktis". Enter =
+// newline (bawaan, tidak perlu suppressKeyboardEvent lagi), Tab/klik-keluar
+// = commit, Escape = batal — semua sudah ditangani internal, tidak lagi
+// bergantung pada getValue() custom yang berkali-kali bermasalah.
+const MULTILINE_EDITOR: Pick<ColDef, 'cellEditor' | 'cellEditorPopup' | 'cellEditorParams' | 'wrapText' | 'autoHeight'> = {
+  cellEditor: 'agLargeTextCellEditor',
+  cellEditorPopup: true,
+  cellEditorParams: {
+    maxLength: 100000, // "tanpa validasi maksimal" secara praktis — angka besar, bukan batas nyata
+    rows: 8,
+    cols: 60,
+  },
+  wrapText: true,
+  autoHeight: true,
+};
 
 interface TestCaseGridProps {
   rows: TestCaseItem[];
   readOnly: boolean;
   qaUsers: UserOption[];
-  onRowDirty: (row: TestCaseItem) => void;   // diganti dari onCellChanged
+  onRowDirty: (row: TestCaseItem) => void;
   onDelete: (row: TestCaseItem) => void;
   onCaptureUpload: (row: TestCaseItem, file: File) => void;
-  onAddRow: () => void;
 }
 
 export function TestCaseGrid({
-  rows, readOnly, qaUsers, onRowDirty, onDelete, onCaptureUpload, onAddRow,
+  rows, readOnly, qaUsers, onRowDirty, onDelete, onCaptureUpload,
 }: TestCaseGridProps) {
   const qaNameById = useMemo(
     () => new Map(qaUsers.map((u) => [u.id, u.fullName])),
@@ -134,9 +143,13 @@ export function TestCaseGrid({
       },
       {
         field: 'caseNo', headerName: 'Case ID', editable: false, width: 150,
-        cellClass: 'monospace-cell', // buat referensi teknis (mis. Postman/Bug linking)
+        cellClass: 'monospace-cell',
+        cellRenderer: (p: { value: string }) => <CaseIdCell value={p.value} />,
       },
-      { field: 'featureName', headerName: 'Feature Name', editable: !readOnly, width: 150 },
+      {
+        field: 'featureName', headerName: 'Feature Name', editable: !readOnly, flex: 1, minWidth: 160,
+        ...MULTILINE_EDITOR,
+      },
       {
         field: 'testType', headerName: 'Test Type', editable: !readOnly, width: 120,
         cellEditor: 'agSelectCellEditor',
@@ -145,14 +158,20 @@ export function TestCaseGrid({
       },
       {
         field: 'scenario', headerName: 'Scenario', editable: !readOnly, flex: 2, minWidth: 200,
-        wrapText: true, autoHeight: true,
-        cellEditor: AutoGrowTextEditor,
-        cellEditorPopup: true,
-        cellEditorParams: { onEnterNewRow: onAddRow },
+        ...MULTILINE_EDITOR,
       },
-      { field: 'steps', headerName: 'Steps', editable: !readOnly, flex: 2, minWidth: 200, wrapText: true, autoHeight: true },
-      { field: 'testData', headerName: 'Data Test', editable: !readOnly, width: 160 },
-      { field: 'expectedResult', headerName: 'Expected Result', editable: !readOnly, flex: 2, minWidth: 200, wrapText: true, autoHeight: true },
+      {
+        field: 'steps', headerName: 'Steps', editable: !readOnly, flex: 2, minWidth: 200,
+        ...MULTILINE_EDITOR,
+      },
+      {
+        field: 'testData', headerName: 'Data Test', editable: !readOnly, width: 180,
+        ...MULTILINE_EDITOR,
+      },
+      {
+        field: 'expectedResult', headerName: 'Expected Result', editable: !readOnly, flex: 2, minWidth: 200,
+        ...MULTILINE_EDITOR,
+      },
       {
         field: 'status', headerName: 'Status', editable: !readOnly, width: 140,
         cellEditor: 'agSelectCellEditor',
@@ -164,14 +183,15 @@ export function TestCaseGrid({
         cellEditor: 'agSelectCellEditor',
         cellEditorParams: {
           values: qaUsers.map((u) => u.id),
-          // Catatan: verifikasi nama param ini terhadap ag-grid v36 docs kalau
-          // dropdown tampil raw UUID — API agSelectCellEditor sempat berubah antar major.
           formatValue: (id: string) => qaNameById.get(id) ?? id,
         },
         valueFormatter: (p) => qaNameById.get(p.value as string) ?? p.data?.picQaName ?? '',
       },
       { field: 'testDate', headerName: 'Test Date', editable: !readOnly, width: 130 },
-      { field: 'note', headerName: 'Note', editable: !readOnly, width: 160 },
+      {
+        field: 'note', headerName: 'Note', editable: !readOnly, width: 180,
+        ...MULTILINE_EDITOR,
+      },
       {
         field: 'devArea', headerName: 'PIC Dev', editable: !readOnly, width: 130,
         cellEditor: 'agSelectCellEditor',
@@ -193,10 +213,9 @@ export function TestCaseGrid({
       });
     }
     return base;
-  }, [readOnly, onDelete, qaUsers, qaNameById, onCaptureUpload, onAddRow]);
+  }, [readOnly, onDelete, qaUsers, qaNameById, onCaptureUpload]);
 
   function handleCellValueChanged(e: CellValueChangedEvent<TestCaseItem>) {
-    // if (e.data) onCellChanged(e.data);
     if (e.data) onRowDirty(e.data);
   }
 
@@ -205,6 +224,7 @@ export function TestCaseGrid({
       <AgGridReact<TestCaseItem>
         theme={gridTheme}
         rowData={rows}
+        getRowId={(p: GetRowIdParams<TestCaseItem>) => p.data.id}
         columnDefs={columnDefs}
         onCellValueChanged={handleCellValueChanged}
         stopEditingWhenCellsLoseFocus
