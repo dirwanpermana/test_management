@@ -35,3 +35,23 @@ export async function updateItem(id: string, payload: Partial<TestCaseItem>): Pr
 export async function deleteItem(id: string): Promise<void> {
   await axiosClient.delete(`/test-case-items/${id}`);
 }
+
+export async function updateHeader(id: string, payload: Partial<{
+  namaTestCase: string; sprint: string; jiraUrl: string; namaMenu: string;
+}>): Promise<TestCaseHeader> {
+  const { data } = await axiosClient.patch(`/test-case-headers/${id}`, payload);
+  return data;
+}
+
+export async function uploadCapture(itemId: string, file: File): Promise<TestCaseItem> {
+  const formData = new FormData();
+  formData.append('file', file);
+  const { data } = await axiosClient.post(`/test-case-items/${itemId}/attachments`, formData, {
+    headers: { 'Content-Type': undefined },
+  });
+  return data;
+}
+
+export async function bulkUpdateItems(items: Array<{ id: string; payload: Partial<TestCaseItem> }>): Promise<void> {
+  await axiosClient.put('/test-case-items/bulk', { items });
+}

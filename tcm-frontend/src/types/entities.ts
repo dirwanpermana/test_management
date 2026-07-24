@@ -15,7 +15,7 @@ export interface AuthSession {
 
 export interface TestCaseHeader {
   id: string;
-  headerCode: string; // '260722'
+  headerCode: string;
   namaTestCase: string;
   sprint?: string;
   jiraUrl: string;
@@ -28,12 +28,14 @@ export interface TestCaseHeader {
 
 export type TestType = 'Positive' | 'Negative';
 export type TestCaseStatus = 'Not Executed' | 'Pass' | 'Fail' | 'Blocked' | 'On Hold';
+export type DevTeam = 'Backend' | 'Frontend';
 
 export interface TestCaseItem {
   id: string;
   headerId: string;
-  caseNo: string; // '260722-01'
+  caseNo: string;      // sekarang identifier acak (UUID-style), bukan lagi sequential
   seqNo: number;
+  displayNo: number;   // NEW — nomor urut tampilan per header, dihitung otomatis
   featureName: string;
   testType: TestType;
   scenario: string;
@@ -41,13 +43,14 @@ export interface TestCaseItem {
   testData?: string;
   expectedResult: string;
   status: TestCaseStatus;
-  picQa: string; // user id
+  picQa: string;
   picQaName?: string;
   testDate?: string;
   note?: string;
-  picDev?: string;
-  picDevName?: string;
-  devArea?: 'FE' | 'BE';
+  devArea?: DevTeam;        // NEW peran — ditampilkan sebagai kolom "PIC Dev"
+  captureId?: string;       // NEW
+  captureUrl?: string;      // NEW
+  captureFileName?: string; // NEW
   createdAt: string;
   updatedAt: string;
 }

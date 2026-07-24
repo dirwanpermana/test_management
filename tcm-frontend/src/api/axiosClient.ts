@@ -14,13 +14,27 @@ axiosClient.interceptors.request.use((config) => {
   return config;
 });
 
+// axiosClient.interceptors.response.use(
+//   (response) => response,
+//   (error) => {
+//     if (error.response?.status === 401) {
+//       localStorage.removeItem('tcm_token');
+//       localStorage.removeItem('tcm_user');
+//       window.location.href = '/login';
+//     }
+//     return Promise.reject(error);
+//   },
+// );
+
+
 axiosClient.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error.response?.status === 401) {
       localStorage.removeItem('tcm_token');
       localStorage.removeItem('tcm_user');
-      window.location.href = '/login';
+      // don't hard-navigate here — dispatch and let AuthProvider/PrivateRoute react
+      window.dispatchEvent(new CustomEvent('tcm:unauthorized'));
     }
     return Promise.reject(error);
   },

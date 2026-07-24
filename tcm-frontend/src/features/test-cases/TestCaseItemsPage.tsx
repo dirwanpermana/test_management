@@ -4,8 +4,10 @@ import { useAuth } from '../../auth/useAuth';
 import { RoleGuard } from '../../auth/RoleGuard';
 import { ConfirmDialog } from '../../components/ui/ConfirmDialog';
 import { TestCaseGrid } from './TestCaseGrid';
+import { TestCaseHeaderEditableCard } from './TestCaseHeaderEditableCard';
 import {
-  useCreateItem, useDeleteItem, useHeaders, useItems, useUpdateItem,
+  useCreateItem, useDeleteItem, useHeaders, useItems,
+  useQaUsers, useUploadCapture, useBulkUpdateItems,
 } from './useTestCases';
 import type { TestCaseItem } from '../../types/entities';
 
@@ -19,7 +21,6 @@ function blankRowPayload() {
     steps: '',
     expectedResult: '',
     status: 'Not Executed' as const,
-    // "test date tidak perlu ada waktunya" — hanya tanggal (YYYY-MM-DD), tanpa jam.
     testDate: new Date().toISOString().slice(0, 10),
   };
 }
@@ -33,14 +34,17 @@ export function TestCaseItemsPage() {
   const { data: headers = [] } = useHeaders();
   const header = headers.find((h) => h.id === headerId);
 
-  const { data: items = [], isLoading } = useItems(headerId);
+  const { data: items = [], isLoading, isError, error } = useItems(headerId);
+  const { data: qaUsers = [] } = useQaUsers();
   const createItem = useCreateItem(headerId ?? '');
-  const updateItem = useUpdateItem();
   const deleteItem = useDeleteItem();
+  const uploadCapture = useUploadCapture();
+  const bulkUpdate = useBulkUpdateItems();
   const [pendingDelete, setPendingDelete] = useState<TestCaseItem | null>(null);
 
-  // Header baru (belum ada baris sama sekali) langsung diisi 10 baris kosong,
-  // meniru template Excel siap-isi, supaya QA tidak perlu klik "+ Tambah Baris" berulang.
+  const dirtyRef = useRef<Map<string, TestCaseItem>>(new Map());
+  const [dirtyCount, setDirtyCount] = useState(0);
+
   const seededHeaderRef = useRef<string | null>(null);
   useEffect(() => {
     if (isLoading || !headerId || readOnly) return;
@@ -49,11 +53,14 @@ export function TestCaseItemsPage() {
     seededHeaderRef.current = headerId;
 
     (async () => {
-      for (let i = 0; i < DEFAULT_ROW_COUNT; i += 1) {
-        // Sengaja sekuensial (bukan Promise.all) supaya seq_no/case_no dari trigger
-        // PostgreSQL tetap berurutan, bukan race condition antar insert paralel.
-        // eslint-disable-next-line no-await-in-loop
-        await createItem.mutateAsync(blankRowPayload());
+      try {
+        for (let i = 0; i < DEFAULT_ROW_COUNT; i += 1) {
+          // eslint-disable-next-line no-await-in-loop
+          await createItem.mutateAsync(blankRowPayload());
+        }
+      } catch (err) {
+        console.error('Auto-seed gagal:', err);
+        seededHeaderRef.current = null;
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -64,40 +71,55 @@ export function TestCaseItemsPage() {
     createItem.mutate(blankRowPayload());
   }
 
+  function handleRowDirty(row: TestCaseItem) {
+    dirtyRef.current.set(row.id, row);
+    setDirtyCount(dirtyRef.current.size);
+  }
+
+  async function handleSave() {
+    const payload = Array.from(dirtyRef.current.values()).map((row) => ({ id: row.id, payload: row }));
+    if (payload.length === 0) return;
+    await bulkUpdate.mutateAsync(payload);
+    dirtyRef.current.clear();
+    setDirtyCount(0);
+  }
+
+  function handleBack() {
+    if (dirtyCount > 0 && !window.confirm(`Ada ${dirtyCount} baris belum disimpan. Tetap keluar?`)) return;
+    navigate('/test-cases');
+  }
+
   return (
     <div className="page">
-      <button className="btn-secondary mb-3" onClick={() => navigate('/test-cases')}>
+      {header && <TestCaseHeaderEditableCard header={header} readOnly={readOnly} />}
+
+      <button className="btn-secondary mb-3" onClick={handleBack}>
         &larr; Kembali ke List Test Case
       </button>
-      <h1>{header ? `${header.headerCode} — ${header.namaTestCase}` : 'Test Case'}</h1>
-      {header && (
-        <p className="muted-inline">
-          Menu: <strong>{header.namaMenu}</strong>
-          {header.sprint && <> · Sprint: <strong>{header.sprint}</strong></>}
-          {header.jiraUrl && (
-            <>
-              {' · '}
-              <a href={header.jiraUrl} target="_blank" rel="noreferrer">Jira</a>
-            </>
-          )}
-        </p>
-      )}
 
       <div className="card">
         <div className="toolbar">
           <RoleGuard allow={['QA']}>
             <button onClick={handleAddRow} disabled={!headerId}>+ Tambah Baris</button>
+            <button onClick={handleSave} disabled={dirtyCount === 0 || bulkUpdate.isPending}>
+              {bulkUpdate.isPending ? 'Menyimpan...' : `💾 Simpan${dirtyCount > 0 ? ` (${dirtyCount})` : ''}`}
+            </button>
           </RoleGuard>
         </div>
 
-        {isLoading ? (
+        {isError ? (
+          <p className="error-text">Gagal memuat data: {(error as Error).message}</p>
+        ) : isLoading ? (
           <p>Memuat data...</p>
         ) : (
           <TestCaseGrid
             rows={items}
             readOnly={readOnly}
-            onCellChanged={(row) => updateItem.mutate({ id: row.id, payload: row })}
+            qaUsers={qaUsers}
+            onRowDirty={handleRowDirty}
             onDelete={(row) => setPendingDelete(row)}
+            onCaptureUpload={(row, file) => uploadCapture.mutate({ itemId: row.id, file })}
+            onAddRow={handleAddRow}
           />
         )}
       </div>

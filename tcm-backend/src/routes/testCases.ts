@@ -1,7 +1,9 @@
+import fs from 'node:fs';
 import { Router } from 'express';
 import { z } from 'zod';
 import { authenticate, requireRole } from '../middleware/auth';
 import { asyncHandler } from '../middleware/asyncHandler';
+import { upload } from '../middleware/upload';
 import { paramStr } from '../utils/params';
 import * as service from '../services/testCaseService';
 
@@ -26,6 +28,16 @@ testCaseRouter.post('/test-case-headers', requireRole('QA'), asyncHandler(async 
   return res.status(201).json(header);
 }));
 
+// BARU — autosave 4 field header (Nama Test Case, Sprint, Nama Menu, Jira URL).
+testCaseRouter.patch('/test-case-headers/:id', requireRole('QA'), asyncHandler(async (req, res) => {
+  const id = paramStr(req.params.id);
+  const parsed = headerSchema.partial().safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ message: 'Payload tidak valid', errors: parsed.error.flatten() });
+  const updated = await service.updateHeader(id, parsed.data);
+  if (!updated) return res.status(404).json({ message: 'Test case header tidak ditemukan' });
+  return res.json(updated);
+}));
+
 testCaseRouter.delete('/test-case-headers/:id', requireRole('QA'), asyncHandler(async (req, res) => {
   const deleted = await service.deleteHeader(paramStr(req.params.id));
   if (!deleted) return res.status(404).json({ message: 'Test case header tidak ditemukan' });
@@ -48,8 +60,7 @@ const itemSchema = z.object({
   picQa: z.string().uuid().optional(),
   testDate: z.string().optional(),
   note: z.string().optional(),
-  picDev: z.string().uuid().optional(),
-  devArea: z.enum(['FE', 'BE']).optional(),
+  devArea: z.enum(['Backend', 'Frontend']).optional(), // dulu 'FE'/'BE', dulu berperan sebagai "Area"
 });
 
 testCaseRouter.post('/test-case-headers/:headerId/items', requireRole('QA'), asyncHandler(async (req, res) => {
@@ -65,6 +76,19 @@ testCaseRouter.post('/test-case-headers/:headerId/items', requireRole('QA'), asy
     picQa: parsed.data.picQa ?? req.auth!.sub,
   });
   return res.status(201).json(item);
+}));
+const bulkUpdateSchema = z.object({
+  items: z.array(z.object({
+    id: z.string().uuid(),
+    payload: itemSchema.partial(),
+  })),
+});
+
+testCaseRouter.put('/test-case-items/bulk', requireRole('QA'), asyncHandler(async (req, res) => {
+  const parsed = bulkUpdateSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ message: 'Payload tidak valid', errors: parsed.error.flatten() });
+  await service.bulkUpdateItems(parsed.data.items);
+  return res.json({ updated: parsed.data.items.length });
 }));
 
 const updateItemSchema = itemSchema.partial();
@@ -82,3 +106,24 @@ testCaseRouter.delete('/test-case-items/:id', requireRole('QA'), asyncHandler(as
   if (!deleted) return res.status(404).json({ message: 'Test case item tidak ditemukan' });
   return res.status(204).send();
 }));
+
+// BARU — upload/ganti "Capture" (field upload di kolom yang dulu "Area").
+testCaseRouter.post(
+  '/test-case-items/:id/attachments',
+  requireRole('QA'),
+  upload.single('file'),
+  asyncHandler(async (req, res) => {
+    const id = paramStr(req.params.id);
+    const exists = await service.findItemById(id);
+    if (!exists) {
+      if (req.file) fs.unlink(req.file.path, () => {});
+      return res.status(404).json({ message: 'Test case item tidak ditemukan' });
+    }
+    if (!req.file) {
+      return res.status(400).json({ message: 'File tidak ditemukan pada request (field name harus "file")' });
+    }
+    const fileUrl = `${req.protocol}://${req.get('host')}/uploads/${req.file.filename}`;
+    const updated = await service.replaceCapture(id, fileUrl, req.file.originalname, req.auth!.sub);
+    return res.status(201).json(updated);
+  }),
+);
