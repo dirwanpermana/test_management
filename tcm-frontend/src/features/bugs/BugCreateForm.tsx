@@ -6,7 +6,8 @@ import { useCreateBug, useDevUsers, useUploadAttachment } from './useBugs';
 import { ALL_BUG_STATUSES } from '../../constants/bugWorkflow';
 import type { BugStatus, Priority, Severity } from '../../types/entities';
 
-export function BugCreateForm({ onCreated }: { onCreated: () => void }) {
+// export function BugCreateForm({ onCreated }: { onCreated: () => void }) {
+export function BugCreateForm({ onCreated }: { onCreated: (bugId: string) => void }) {
   const { user } = useAuth();
   const { data: devUsers = [] } = useDevUsers();
   const { data: allItems = [] } = useItems();
@@ -89,7 +90,7 @@ export function BugCreateForm({ onCreated }: { onCreated: () => void }) {
     setHeaderId(''); setTestCaseNo(''); setScenario(''); setStepsToReproduce('');
     setExpectedResult(''); setActualResult(''); setAssignedTo('');
     setSeverity('Medium'); setPriority('Medium'); setStatus('Open'); setFile(null); setSprint(null);
-    onCreated();
+    onCreated(bug.id);
   }
 
   return (
@@ -182,15 +183,26 @@ export function BugCreateForm({ onCreated }: { onCreated: () => void }) {
         />
       </div>
 
+      <div className="field">
+       <label className="field-label-hidden">Submit</label>
+       <button type="submit" disabled={createBug.isPending || uploadAttachment.isPending}>
+         {createBug.isPending
+           ? 'Mengirim...'
+           : uploadAttachment.isPending
+             ? 'Mengunggah dokumen...'
+             : 'Submit'}
+       </button>
+     </div>
+
       {uploadError && <div className="error-text field-full">{uploadError}</div>}
 
-      <button type="submit" disabled={createBug.isPending || uploadAttachment.isPending}>
+      {/* <button type="submit" disabled={createBug.isPending || uploadAttachment.isPending}>
         {createBug.isPending
           ? 'Mengirim...'
           : uploadAttachment.isPending
             ? 'Mengunggah dokumen...'
             : 'Submit'}
-      </button>
+      </button> */}
     </form>
   );
 }

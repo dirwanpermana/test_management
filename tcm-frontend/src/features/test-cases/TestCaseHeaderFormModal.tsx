@@ -113,7 +113,7 @@ export function TestCaseHeaderFormModal({ onClose, onCreated }: Props) {
             onChange={(e) => setFile(e.target.files?.[0] ?? null)}
           />
           <span className="muted-inline" style={{ marginTop: 4 }}>
-            Kolom yang diambil: Pastikan file Test case yang di upload sesuai template!
+            Pastikan file Test case yang di upload sesuai template!
           </span>
         </div>
 

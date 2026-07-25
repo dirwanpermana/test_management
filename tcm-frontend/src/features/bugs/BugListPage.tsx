@@ -2,23 +2,21 @@ import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { RoleGuard } from '../../auth/RoleGuard';
 import { StatusBadge } from '../../components/ui/StatusBadge';
-import { BugCreateForm } from './BugCreateForm';
 import { useBugs } from './useBugs';
 import { downloadBugReport } from '../../api/bugApi';
 
-const PAGE_SIZE_OPTIONS = [25, 50] as const;
+const PAGE_SIZE = 25;
 
 export function BugListPage() {
   const navigate = useNavigate();
   const { data: bugs = [], isLoading } = useBugs();
-  const [showForm, setShowForm] = useState(false);
 
   const [search, setSearch] = useState('');
   const [testCaseFilter, setTestCaseFilter] = useState('');
   const [reporterFilter, setReporterFilter] = useState('');
+  const [assignedToFilter, setAssignedToFilter] = useState('');
   const [sprintFilter, setSprintFilter] = useState('');
 
-  const [pageSize, setPageSize] = useState<number>(PAGE_SIZE_OPTIONS[0]);
   const [page, setPage] = useState(1);
 
   function testCaseLabel(b: (typeof bugs)[number]) {
@@ -31,6 +29,10 @@ export function BugListPage() {
   );
   const reporterOptions = useMemo(
     () => Array.from(new Set(bugs.map((b) => b.reporterName).filter(Boolean))).sort(),
+    [bugs],
+  );
+  const assignedToOptions = useMemo(
+    () => Array.from(new Set(bugs.map((b) => b.assignedToName).filter(Boolean))).sort(),
     [bugs],
   );
   const sprintOptions = useMemo(
@@ -47,48 +49,42 @@ export function BugListPage() {
         || testCaseLabel(b).toLowerCase().includes(q);
       const matchesTestCase = !testCaseFilter || testCaseLabel(b) === testCaseFilter;
       const matchesReporter = !reporterFilter || b.reporterName === reporterFilter;
+      const matchesAssignedTo = !assignedToFilter || b.assignedToName === assignedToFilter;
       const matchesSprint = !sprintFilter || String(b.sprint ?? '') === sprintFilter;
-      return matchesSearch && matchesTestCase && matchesReporter && matchesSprint;
+      return matchesSearch && matchesTestCase && matchesReporter && matchesAssignedTo && matchesSprint;
     });
-  }, [bugs, search, testCaseFilter, reporterFilter, sprintFilter]);
+  }, [bugs, search, testCaseFilter, reporterFilter, assignedToFilter, sprintFilter]);
 
-  const totalPages = Math.max(1, Math.ceil(filteredBugs.length / pageSize));
+  const totalPages = Math.max(1, Math.ceil(filteredBugs.length / PAGE_SIZE));
 
   useEffect(() => {
     setPage(1);
-  }, [search, testCaseFilter, reporterFilter, sprintFilter, pageSize]);
+  }, [search, testCaseFilter, reporterFilter, assignedToFilter, sprintFilter]);
 
   useEffect(() => {
     if (page > totalPages) setPage(totalPages);
   }, [page, totalPages]);
 
   const paginatedBugs = useMemo(() => {
-    const start = (page - 1) * pageSize;
-    return filteredBugs.slice(start, start + pageSize);
-  }, [filteredBugs, page, pageSize]);
+    const start = (page - 1) * PAGE_SIZE;
+    return filteredBugs.slice(start, start + PAGE_SIZE);
+  }, [filteredBugs, page]);
 
   return (
     <div className="page">
-      <h1>List Bug</h1>
+      {/* <h1>List Bug</h1> */}
 
-      <RoleGuard allow={['QA']}>
-        <button className="mb-3" onClick={() => setShowForm((v) => !v)}>
-          {showForm ? 'Tutup Form' : '+ Buat Bug Baru'}
+      <div className="page-actions">
+        <RoleGuard allow={['QA']}>
+          <button onClick={() => navigate('/bugs/new')}>+ Create New Bug</button>
+        </RoleGuard>
+        <button className="btn-secondary" onClick={() => downloadBugReport()}>
+          📊 Download Report
         </button>
-        {showForm && <BugCreateForm onCreated={() => setShowForm(false)} />}
-      </RoleGuard>
-      <button className="btn-secondary mb-3" onClick={() => downloadBugReport()}>
-        📊 Download Laporan
-      </button>
+      </div>
 
       <div className="card">
         <div className="toolbar">
-          <input
-            className="search-input"
-            placeholder="Cari nomor bug / scenario / test case..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
           <select value={testCaseFilter} onChange={(e) => setTestCaseFilter(e.target.value)}>
             <option value="">Semua ID Test Case</option>
             {testCaseOptions.map((t) => <option key={t} value={t}>{t}</option>)}
@@ -97,15 +93,20 @@ export function BugListPage() {
             <option value="">Semua Pembuat</option>
             {reporterOptions.map((r) => <option key={r} value={r}>{r}</option>)}
           </select>
+          <select value={assignedToFilter} onChange={(e) => setAssignedToFilter(e.target.value)}>
+            <option value="">Semua Assign To</option>
+            {assignedToOptions.map((a) => <option key={a} value={a}>{a}</option>)}
+          </select>
           <select value={sprintFilter} onChange={(e) => setSprintFilter(e.target.value)}>
             <option value="">Semua Sprint</option>
             {sprintOptions.map((s) => <option key={s} value={s}>{s}</option>)}
           </select>
-          <select value={pageSize} onChange={(e) => setPageSize(Number(e.target.value))} title="Jumlah baris per halaman">
-            {PAGE_SIZE_OPTIONS.map((size) => (
-              <option key={size} value={size}>{size} / halaman</option>
-            ))}
-          </select>
+          <input
+            className="search-input toolbar-search"
+            placeholder="Cari nomor bug / scenario / test case..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
         </div>
 
         {isLoading ? (
@@ -155,7 +156,7 @@ export function BugListPage() {
             {filteredBugs.length > 0 && (
               <div className="pagination-bar">
                 <span className="pagination-info">
-                  Menampilkan {(page - 1) * pageSize + 1}–{Math.min(page * pageSize, filteredBugs.length)} dari {filteredBugs.length} data
+                  Menampilkan {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, filteredBugs.length)} dari {filteredBugs.length} data
                 </span>
                 <div className="pagination-controls">
                   <button className="btn-secondary" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page <= 1}>

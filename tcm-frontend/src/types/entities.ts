@@ -127,6 +127,10 @@ export interface TestCaseMonitoring {
   percentage: number;
   category: MonitoringCategory;
   picQaNames: string;
+  sprint: number | null;
+  namaMenu: string;
+  jiraUrl: string;
+  createdAt: string;
 }
 
 export interface BugMonitoring {

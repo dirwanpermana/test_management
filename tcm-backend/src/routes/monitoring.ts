@@ -10,7 +10,8 @@ monitoringRouter.get('/monitoring/test-cases', asyncHandler(async (_req, res) =>
   const { rows } = await pool.query(
     `SELECT header_id AS "headerId", header_code AS "headerCode", nama_test_case AS "namaTestCase",
             total_case AS "totalCase", executed_case AS "executedCase", percentage,
-            category, pic_qa_names AS "picQaNames"
+            category, pic_qa_names AS "picQaNames",
+            sprint, nama_menu AS "namaMenu", jira_url AS "jiraUrl", created_at AS "createdAt"
      FROM v_test_case_monitoring ORDER BY header_code DESC`,
   );
   res.json(rows);

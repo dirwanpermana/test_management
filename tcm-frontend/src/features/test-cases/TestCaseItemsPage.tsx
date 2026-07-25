@@ -121,7 +121,7 @@ const displayRows = useMemo(
   }
 
   function handleBack() {
-    if (dirtyCount > 0 && !window.confirm(`Ada ${dirtyCount} baris belum disimpan. Tetap keluar?`)) return;
+    if (dirtyCount > 0 && !window.confirm(`Scenario ${dirtyCount} belum disimpan. Yakin tetap keluar?`)) return;
     navigate('/test-cases');
   }
 
@@ -130,15 +130,15 @@ const displayRows = useMemo(
       {header && <TestCaseHeaderEditableCard header={header} readOnly={readOnly} />}
 
       <button className="btn-secondary mb-3" onClick={handleBack}>
-        &larr; Back
+        Back
       </button>
 
       <div className="card">
         <div className="toolbar">
           <RoleGuard allow={['QA']}>
-            <button onClick={handleAddRow} disabled={!headerId}>+ Tambah Baris</button>
+            <button onClick={handleAddRow} disabled={!headerId}>+ Add Scenario</button>
             <button onClick={handleSave} disabled={dirtyCount === 0 || bulkUpdate.isPending}>
-              {bulkUpdate.isPending ? 'Menyimpan...' : `💾 Simpan${dirtyCount > 0 ? ` (${dirtyCount})` : ''}`}
+              {bulkUpdate.isPending ? 'Menyimpan...' : `💾 Save${dirtyCount > 0 ? ` (${dirtyCount})` : ''}`}
             </button>
           </RoleGuard>
           <button

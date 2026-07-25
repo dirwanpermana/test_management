@@ -3,25 +3,27 @@ import { useNavigate } from 'react-router-dom';
 import { RoleGuard } from '../../auth/RoleGuard';
 import { ConfirmDialog } from '../../components/ui/ConfirmDialog';
 import { TestCaseHeaderFormModal } from './TestCaseHeaderFormModal';
-import { useDeleteHeader, useHeaders } from './useTestCases';
+import { useDeleteHeader, useHeaders, useItems, useQaUsers } from './useTestCases';
 import { downloadTemplate, downloadReport } from '../../api/testCaseApi';
 import type { TestCaseHeader } from '../../types/entities';
 import { useAuth } from '../../auth/useAuth';
 
-const PAGE_SIZE_OPTIONS = [15, 25, 50, 75, 100] as const;
+const PAGE_SIZE = 25;
 
 export function TestCaseListPage() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const { data: headers = [], isLoading } = useHeaders();
+  const { data: allItems = [] } = useItems();
+  const { data: qaUsers = [] } = useQaUsers();
   const deleteHeader = useDeleteHeader();
 
   const [showForm, setShowForm] = useState(false);
   const [search, setSearch] = useState('');
   const [menuFilter, setMenuFilter] = useState('');
+  const [qaFilter, setQaFilter] = useState('');
   const [pendingDelete, setPendingDelete] = useState<TestCaseHeader | null>(null);
 
-  const [pageSize, setPageSize] = useState<number>(PAGE_SIZE_OPTIONS[0]);
   const [page, setPage] = useState(1);
 
   const menuOptions = useMemo(
@@ -29,6 +31,9 @@ export function TestCaseListPage() {
     [headers],
   );
 
+  // Test case header itu sendiri tidak punya field PIC QA (PIC QA nempel di
+  // level item/baris) — jadi filternya: header ikut lolos kalau MINIMAL SATU
+  // item di bawahnya di-assign ke QA yang dipilih.
   const filteredHeaders = useMemo(() => {
     const q = search.trim().toLowerCase();
     return headers.filter((h) => {
@@ -36,30 +41,25 @@ export function TestCaseListPage() {
         || h.namaTestCase.toLowerCase().includes(q)
         || h.headerCode.toLowerCase().includes(q);
       const matchesMenu = !menuFilter || h.namaMenu === menuFilter;
-      return matchesSearch && matchesMenu;
+      const matchesQa = !qaFilter || allItems.some((it) => it.headerId === h.id && it.picQa === qaFilter);
+      return matchesSearch && matchesMenu && matchesQa;
     });
-  }, [headers, search, menuFilter]);
+  }, [headers, allItems, search, menuFilter, qaFilter]);
 
-  const totalPages = Math.max(1, Math.ceil(filteredHeaders.length / pageSize));
+  const totalPages = Math.max(1, Math.ceil(filteredHeaders.length / PAGE_SIZE));
 
-  // Reset ke halaman 1 setiap kali filter/pencarian/jumlah baris per halaman
-  // berubah — supaya tidak "nyangkut" di halaman 3 padahal hasil filter baru
-  // cuma punya 1 halaman.
   useEffect(() => {
     setPage(1);
-  }, [search, menuFilter, pageSize]);
+  }, [search, menuFilter, qaFilter]);
 
-  // Jaga-jaga: kalau data berkurang (mis. ada yang dihapus) dan halaman aktif
-  // jadi lebih besar dari totalPages yang baru, mundurkan ke halaman terakhir
-  // yang valid.
   useEffect(() => {
     if (page > totalPages) setPage(totalPages);
   }, [page, totalPages]);
 
   const paginatedHeaders = useMemo(() => {
-    const start = (page - 1) * pageSize;
-    return filteredHeaders.slice(start, start + pageSize);
-  }, [filteredHeaders, page, pageSize]);
+    const start = (page - 1) * PAGE_SIZE;
+    return filteredHeaders.slice(start, start + PAGE_SIZE);
+  }, [filteredHeaders, page]);
 
   return (
     <div className="page">
@@ -67,25 +67,16 @@ export function TestCaseListPage() {
 
       <div className="card">
         <div className="toolbar">
-          <input
-            className="search-input"
-            placeholder="Cari ID atau nama test case..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
           <select value={menuFilter} onChange={(e) => setMenuFilter(e.target.value)}>
             <option value="">Semua Menu</option>
             {menuOptions.map((m) => (
               <option key={m} value={m}>{m}</option>
             ))}
           </select>
-          <select
-            value={pageSize}
-            onChange={(e) => setPageSize(Number(e.target.value))}
-            title="Jumlah baris per halaman"
-          >
-            {PAGE_SIZE_OPTIONS.map((size) => (
-              <option key={size} value={size}>view {size} / data</option>
+          <select value={qaFilter} onChange={(e) => setQaFilter(e.target.value)}>
+            <option value="">Semua PIC QA</option>
+            {qaUsers.map((u) => (
+              <option key={u.id} value={u.id}>{u.fullName}</option>
             ))}
           </select>
           <RoleGuard allow={['QA']}>
@@ -97,6 +88,12 @@ export function TestCaseListPage() {
           <button className="btn-secondary" onClick={() => downloadReport()}>
             📊 Download Laporan
           </button>
+          <input
+            className="search-input toolbar-search"
+            placeholder="Cari ID atau nama test case..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
         </div>
 
         {isLoading ? (
@@ -122,7 +119,7 @@ export function TestCaseListPage() {
                   <tr key={h.id}>
                     <td className="action-cell">
                       <button className="btn-link" onClick={() => navigate(`/test-cases/${h.id}`)}>
-                       {user?.role === 'QA' ? 'Update' : 'Detail'} 
+                        {user?.role === 'QA' ? 'Update' : 'Detail'}
                       </button>
                       <RoleGuard allow={['QA']}>
                         <button className="btn-link btn-link-danger" onClick={() => setPendingDelete(h)}>Hapus</button>
@@ -147,7 +144,7 @@ export function TestCaseListPage() {
             {filteredHeaders.length > 0 && (
               <div className="pagination-bar">
                 <span className="pagination-info">
-                  Menampilkan {(page - 1) * pageSize + 1}–{Math.min(page * pageSize, filteredHeaders.length)} dari {filteredHeaders.length} data
+                  Menampilkan {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, filteredHeaders.length)} dari {filteredHeaders.length} data
                 </span>
                 <div className="pagination-controls">
                   <button
