@@ -116,7 +116,6 @@ export function NotesPage() {
 
   return (
     <div className="page">
-      <h1>Notes</h1>
       <div className="notes-layout">
         <div className="notes-sidebar">
           <button className="notes-new-btn" onClick={handleNewNote} disabled={createNote.isPending}>
