@@ -68,8 +68,8 @@ function DeleteButtonCell({ data, onDelete }: { data: TestCaseItem; onDelete: (r
 }
 
 function CaptureCell({
-  data, onUpload,
-}: { data: TestCaseItem; onUpload: (row: TestCaseItem, file: File) => void }) {
+  data, onUpload, readOnly,
+ }: { data: TestCaseItem; onUpload: (row: TestCaseItem, file: File) => void; readOnly: boolean }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const isImage = /\.(png|jpe?g|gif|webp)$/i.test(data.captureFileName ?? '');
 
@@ -82,6 +82,18 @@ function CaptureCell({
     if (file) onUpload(data, file);
     e.target.value = '';
   }
+
+  // Dev cuma boleh melihat capture yang sudah ada, tidak boleh
+  // upload/ganti — dia hanya punya akses view.
+   if (readOnly) {
+     return data.captureUrl ? (
+       <a href={data.captureUrl} target="_blank" rel="noreferrer" title={data.captureFileName}>
+         {isImage ? <img src={data.captureUrl} alt="" className="capture-thumb" /> : '📄 Lihat'}
+       </a>
+     ) : (
+       <span className="muted">-</span>
+     );
+   }
 
   return (
     <div className="capture-cell">
@@ -200,7 +212,7 @@ export function TestCaseGrid({
       {
         headerName: 'Capture', editable: false, width: 160,
         cellRenderer: (p: { data: TestCaseItem }) => (
-          <CaptureCell data={p.data} onUpload={onCaptureUpload} />
+          <CaptureCell data={p.data} onUpload={onCaptureUpload} readOnly={readOnly} />
         ),
       },
     ];

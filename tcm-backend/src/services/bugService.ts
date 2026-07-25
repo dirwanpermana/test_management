@@ -1,10 +1,12 @@
 import { pool } from '../db/pool';
+import * as XLSX from 'xlsx';
 
 const BUG_SELECT = `
     SELECT
       b.id, b.bug_no AS "bugNo", b.test_case_item_id AS "testCaseItemId",
       tci.case_no AS "testCaseNo",
-+     tch.header_code AS "testCaseHeaderCode", tch.nama_test_case AS "testCaseHeaderName",
+      tch.header_code AS "testCaseHeaderCode", tch.nama_test_case AS "testCaseHeaderName",
+      tch.sprint AS "sprint",
       b.reporter_id AS "reporterId", reporter.full_name AS "reporterName",
       b.scenario, b.steps_to_reproduce AS "stepsToReproduce",
       b.expected_result AS "expectedResult", b.actual_result AS "actualResult",
@@ -13,7 +15,7 @@ const BUG_SELECT = `
       b.created_at AS "createdAt", b.updated_at AS "updatedAt"
     FROM bugs b
     LEFT JOIN test_case_items tci ON tci.id = b.test_case_item_id
-+   LEFT JOIN test_case_headers tch ON tch.id = tci.header_id
+    LEFT JOIN test_case_headers tch ON tch.id = tci.header_id
     LEFT JOIN users reporter ON reporter.id = b.reporter_id
     LEFT JOIN users assignee ON assignee.id = b.assigned_to
   `;
@@ -147,4 +149,25 @@ export async function addComment(bugId: string, userId: string, comment: string)
   );
   const { rows: userRow } = await pool.query('SELECT full_name AS "fullName" FROM users WHERE id = $1', [userId]);
   return { ...rows[0], userName: userRow[0]?.fullName };
+}
+
+export function generateBugReportWorkbook(bugsData: Array<Record<string, unknown>>): Buffer {
+  const headerRow = ['Nomor Bug', 'Test Case', 'Sprint', 'Pembuat', 'Scenario', 'Severity', 'Priority', 'Status', 'Assign to', 'Create Date'];
+  const rows = bugsData.map((b) => [
+    b.bugNo,
+    b.testCaseHeaderCode ? `${b.testCaseHeaderCode} — ${b.testCaseHeaderName}` : '-',
+    b.sprint ?? '',
+    b.reporterName ?? '',
+    b.scenario,
+    b.severity,
+    b.priority,
+    b.status,
+    b.assignedToName ?? '',
+    new Date(b.createdAt as string).toLocaleString('id-ID'),
+  ]);
+  const ws = XLSX.utils.aoa_to_sheet([headerRow, ...rows]);
+  ws['!cols'] = headerRow.map((h) => ({ wch: Math.max(h.length + 4, 16) }));
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Laporan Bug');
+  return XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }) as Buffer;
 }

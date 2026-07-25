@@ -5,11 +5,9 @@ import { RoleGuard } from '../../auth/RoleGuard';
 import { ConfirmDialog } from '../../components/ui/ConfirmDialog';
 import { TestCaseGrid } from './TestCaseGrid';
 import { TestCaseHeaderEditableCard } from './TestCaseHeaderEditableCard';
-import {
-  useCreateItem, useDeleteItem, useHeaders, useItems,
-  useQaUsers, useUploadCapture, useBulkUpdateItems,
-} from './useTestCases';
 import type { TestCaseItem } from '../../types/entities';
+import { useCreateItem, useDeleteItem, useHeaders, useItems, useQaUsers, useUploadCapture, useBulkUpdateItems } from './useTestCases';
+import { exportItems } from '../../api/testCaseApi';
 
 const DEFAULT_ROW_COUNT = 10;
 
@@ -143,6 +141,13 @@ const displayRows = useMemo(
               {bulkUpdate.isPending ? 'Menyimpan...' : `💾 Simpan${dirtyCount > 0 ? ` (${dirtyCount})` : ''}`}
             </button>
           </RoleGuard>
+          <button
+           className="btn-secondary"
+           onClick={() => header && exportItems(header.id, header.headerCode, header.namaTestCase)}
+           disabled={!header}
+         >
+           📥 Download Test Case
+         </button>
         </div>
 
         {isError ? (

@@ -2,6 +2,7 @@ import { axiosClient } from './axiosClient';
 import type {
   Attachment, Bug, BugComment, BugStatus, BugStatusHistory, Priority, Severity,
 } from '../types/entities';
+import { triggerBlobDownload, sanitizeFilenamePart, currentUserName, todayDateStr } from '../utils/downloadFile';
 
 export async function listBugs(): Promise<Bug[]> {
   const { data } = await axiosClient.get('/bugs');
@@ -41,4 +42,21 @@ export async function uploadAttachment(bugId: string, file: File): Promise<Attac
     headers: { 'Content-Type': undefined },
   });
   return data;
+}
+
+// export async function downloadBugReport(): Promise<void> {
+//   const response = await axiosClient.get('/bugs/report', { responseType: 'blob' });
+//   const url = window.URL.createObjectURL(new Blob([response.data]));
+//   const link = document.createElement('a');
+//   link.href = url;
+//   link.download = 'Laporan_Bug.xlsx';
+//   document.body.appendChild(link);
+//   link.click();
+//   link.remove();
+//   window.URL.revokeObjectURL(url);
+// }
+export async function downloadBugReport(): Promise<void> {
+  const response = await axiosClient.get('/bugs/report', { responseType: 'blob' });
+  const filename = `Laporan Bug - ${todayDateStr()} - ${sanitizeFilenamePart(currentUserName())}.xlsx`;
+  triggerBlobDownload(response.data, filename);
 }

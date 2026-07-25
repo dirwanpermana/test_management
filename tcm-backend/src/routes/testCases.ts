@@ -29,6 +29,26 @@ testCaseRouter.get('/test-case-headers/template', (req, res) => {
   res.send(buffer);
 });
 
+testCaseRouter.get('/test-case-headers/report', asyncHandler(async (_req, res) => {
+  const headers = await service.listHeaders();
+  const buffer = service.generateHeaderReportWorkbook(headers);
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  res.setHeader('Content-Disposition', 'attachment; filename="Laporan_Test_Case.xlsx"');
+  res.send(buffer);
+}));
+
+testCaseRouter.get('/test-case-headers/:headerId/items/export', asyncHandler(async (req, res) => {
+  const headerId = paramStr(req.params.headerId);
+  const headers = await service.listHeaders();
+  const header = headers.find((h) => h.id === headerId);
+  if (!header) return res.status(404).json({ message: 'Header tidak ditemukan' });
+  const items = await service.listItems(headerId);
+  const buffer = service.generateItemsReportWorkbook(items);
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  res.setHeader('Content-Disposition', `attachment; filename="${header.headerCode}.xlsx"`);
+  res.send(buffer);
+}));
+
 testCaseRouter.post('/test-case-headers', requireRole('QA'), asyncHandler(async (req, res) => {
   const parsed = headerSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ message: 'Payload tidak valid', errors: parsed.error.flatten() });

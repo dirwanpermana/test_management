@@ -6,7 +6,7 @@ import { allowedStatusesForRole } from '../../constants/bugWorkflow';
 import { useAddComment, useBugDetail, useChangeBugStatus, useUploadAttachment } from './useBugs';
 import type { BugStatus } from '../../types/entities';
 
-export function BugDetailPage({ editable }: { editable: boolean }) {
+export function BugDetailPage() {
   const { bugId } = useParams<{ bugId: string }>();
   const navigate = useNavigate();
   const { user } = useAuth();
@@ -54,6 +54,8 @@ export function BugDetailPage({ editable }: { editable: boolean }) {
     }
   }
 
+  // QA: bisa ubah ke status manapun. DEV: dibatasi 3 status (lihat bugWorkflow.ts).
+  // Role lain (kalau ada nanti): array kosong -> kontrol ubah status otomatis tersembunyi.
   const statusOptions = allowedStatusesForRole(user?.role);
 
   if (isLoading || !data) {
@@ -94,6 +96,10 @@ export function BugDetailPage({ editable }: { editable: boolean }) {
           <div className="value monospace-cell">{bug.testCaseNo ?? '-'}</div>
         </div>
         <div className="bug-summary-item">
+         <div className="label">Sprint</div>
+         <div className="value">{bug.sprint ?? '-'}</div>
+        </div>
+        <div className="bug-summary-item">
           <div className="label">Pembuat</div>
           <div className="value">{bug.reporterName}</div>
         </div>
@@ -116,12 +122,10 @@ export function BugDetailPage({ editable }: { editable: boolean }) {
       <div className="card bug-section-card">
         <div className="toolbar">
           <h3 style={{ margin: 0 }}>Dokumen Pendukung</h3>
-          {editable && (
-            <label className="btn-secondary" style={{ cursor: 'pointer' }}>
-              {uploadAttachment.isPending ? 'Mengunggah...' : '+ Upload Dokumen'}
-              <input type="file" hidden onChange={handleUploadFile} disabled={uploadAttachment.isPending} />
-            </label>
-          )}
+          <label className="btn-secondary" style={{ cursor: 'pointer' }}>
+            {uploadAttachment.isPending ? 'Mengunggah...' : '+ Upload Dokumen'}
+            <input type="file" hidden onChange={handleUploadFile} disabled={uploadAttachment.isPending} />
+          </label>
         </div>
         {uploadError && <div className="error-text">{uploadError}</div>}
         <ul className="attachment-list">
@@ -134,29 +138,36 @@ export function BugDetailPage({ editable }: { editable: boolean }) {
         </ul>
       </div>
 
-      {editable && (
+      <div className="card bug-section-card">
+        <h3>Ubah Status</h3>
+        {statusOptions.length === 0 ? (
+          <span className="muted">Role Anda tidak bisa mengubah status bug.</span>
+        ) : (
+          <div className="status-change-controls">
+            <select
+              value={selectedStatus || bug.status}
+              onChange={(e) => setSelectedStatus(e.target.value as BugStatus)}
+            >
+              {statusOptions.map((s) => (
+                <option key={s} value={s}>{s}</option>
+              ))}
+            </select>
+            <button onClick={handleSaveStatus} disabled={changeStatus.isPending}>
+              {changeStatus.isPending ? 'Menyimpan...' : 'Simpan Status'}
+            </button>
+          </div>
+        )}
+        {statusError && <div className="error-text">{statusError}</div>}
+
         <div className="card bug-section-card">
-          <h3>Ubah Status</h3>
-          {statusOptions.length === 0 ? (
-            <span className="muted">Role Anda tidak bisa mengubah status bug.</span>
-          ) : (
-            <div className="status-change-controls">
-              <select
-                value={selectedStatus || bug.status}
-                onChange={(e) => setSelectedStatus(e.target.value as BugStatus)}
-              >
-                {statusOptions.map((s) => (
-                  <option key={s} value={s}>{s}</option>
-                ))}
-              </select>
-              <button onClick={handleSaveStatus} disabled={changeStatus.isPending}>
-                {changeStatus.isPending ? 'Menyimpan...' : 'Simpan Status'}
-              </button>
-            </div>
-          )}
-          {statusError && <div className="error-text">{statusError}</div>}
+            <h3>Riwayat Status</h3>
+            <ul className="history-list">
+            {data.history.map((h) => (
+                <li key={h.id}>{h.fromStatus ?? 'created'} → {h.toStatus} ({new Date(h.changedAt).toLocaleString('id-ID')})</li>
+            ))}
+            </ul>
         </div>
-      )}
+      </div>
 
       <div className="card bug-section-card">
         <h3>Komentar</h3>
@@ -164,30 +175,27 @@ export function BugDetailPage({ editable }: { editable: boolean }) {
           {data.comments.length === 0 && <p className="muted">Belum ada komentar.</p>}
           {data.comments.map((c) => (
             <div key={c.id} className="comment-item">
-              <strong>{c.userName}</strong>
-              <span>{c.comment}</span>
+             <div className="comment-item-header">
+               <strong>{c.userName}</strong>
+               <span className="comment-item-time">
+                 {new Date(c.createdAt).toLocaleString('id-ID', {
+                   day: '2-digit', month: '2-digit', year: 'numeric',
+                   hour: '2-digit', minute: '2-digit',
+                 })}
+               </span>
+             </div>
+             <span>{c.comment}</span>
             </div>
           ))}
         </div>
-        {editable && (
-          <form onSubmit={handleAddComment} className="comment-form">
-            <input
-              value={comment}
-              onChange={(e) => setComment(e.target.value)}
-              placeholder={`Komentar sebagai ${user?.fullName}`}
-            />
-            <button type="submit">Kirim</button>
-          </form>
-        )}
-      </div>
-
-      <div className="card bug-section-card">
-        <h3>Riwayat Status</h3>
-        <ul className="history-list">
-          {data.history.map((h) => (
-            <li key={h.id}>{h.fromStatus ?? 'created'} → {h.toStatus} ({new Date(h.changedAt).toLocaleString('id-ID')})</li>
-          ))}
-        </ul>
+        <form onSubmit={handleAddComment} className="comment-form">
+          <input
+            value={comment}
+            onChange={(e) => setComment(e.target.value)}
+            placeholder={`Komentar sebagai ${user?.fullName}`}
+          />
+          <button type="submit">Kirim</button>
+        </form>
       </div>
     </div>
   );

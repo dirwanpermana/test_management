@@ -4,13 +4,15 @@ import { RoleGuard } from '../../auth/RoleGuard';
 import { ConfirmDialog } from '../../components/ui/ConfirmDialog';
 import { TestCaseHeaderFormModal } from './TestCaseHeaderFormModal';
 import { useDeleteHeader, useHeaders } from './useTestCases';
-import { downloadTemplate } from '../../api/testCaseApi';
+import { downloadTemplate, downloadReport } from '../../api/testCaseApi';
 import type { TestCaseHeader } from '../../types/entities';
+import { useAuth } from '../../auth/useAuth';
 
 const PAGE_SIZE_OPTIONS = [15, 25, 50, 75, 100] as const;
 
 export function TestCaseListPage() {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const { data: headers = [], isLoading } = useHeaders();
   const deleteHeader = useDeleteHeader();
 
@@ -92,6 +94,9 @@ export function TestCaseListPage() {
               📥 Download Template
             </button>
           </RoleGuard>
+          <button className="btn-secondary" onClick={() => downloadReport()}>
+            📊 Download Laporan
+          </button>
         </div>
 
         {isLoading ? (
@@ -116,7 +121,9 @@ export function TestCaseListPage() {
                 {paginatedHeaders.map((h) => (
                   <tr key={h.id}>
                     <td className="action-cell">
-                      <button className="btn-link" onClick={() => navigate(`/test-cases/${h.id}`)}>Edit</button>
+                      <button className="btn-link" onClick={() => navigate(`/test-cases/${h.id}`)}>
+                       {user?.role === 'QA' ? 'Update' : 'Detail'} 
+                      </button>
                       <RoleGuard allow={['QA']}>
                         <button className="btn-link btn-link-danger" onClick={() => setPendingDelete(h)}>Hapus</button>
                       </RoleGuard>

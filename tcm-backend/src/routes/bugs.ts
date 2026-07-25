@@ -14,6 +14,15 @@ bugRouter.get('/bugs', asyncHandler(async (_req, res) => {
   res.json(await service.listBugs());
 }));
 
+// donwload excel
+ bugRouter.get('/bugs/report', asyncHandler(async (_req, res) => {
+   const bugs = await service.listBugs();
+   const buffer = service.generateBugReportWorkbook(bugs);
+   res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+   res.setHeader('Content-Disposition', 'attachment; filename="Laporan_Bug.xlsx"');
+   res.send(buffer);
+ }));
+
 bugRouter.get('/bugs/:id', asyncHandler(async (req, res) => {
   const id = paramStr(req.params.id);
   const bug = await service.getBugById(id);

@@ -496,3 +496,36 @@ export function generateTemplateWorkbook(): Buffer {
 
   return XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' }) as Buffer;
 }
+
+// Laporan List Test Case — kolom sama persis dengan tabel di UI List Test Case.
+export function generateHeaderReportWorkbook(headersData: Array<{
+  headerCode: string; namaTestCase: string; sprint: number | null; namaMenu: string;
+  jiraUrl: string; createdByName?: string; createdAt: string; updatedAt?: string;
+}>): Buffer {
+  const headerRow = ['ID Test Case', 'Nama Test Case', 'Sprint', 'Nama Menu', 'Jira URL', 'Create By', 'Create Date', 'Update Date'];
+  const rows = headersData.map((h) => [
+    h.headerCode, h.namaTestCase, h.sprint ?? '', h.namaMenu, h.jiraUrl ?? '',
+    h.createdByName ?? '', new Date(h.createdAt).toLocaleString('id-ID'),
+    h.updatedAt ? new Date(h.updatedAt).toLocaleString('id-ID') : '',
+  ]);
+  const ws = XLSX.utils.aoa_to_sheet([headerRow, ...rows]);
+  ws['!cols'] = headerRow.map((h) => ({ wch: Math.max(h.length + 4, 16) }));
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Laporan Test Case');
+  return XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }) as Buffer;
+}
+
+// Export detail test case per-header — format sama persis dengan template upload.
+export function generateItemsReportWorkbook(items: Array<Record<string, unknown>>): Buffer {
+  const rows = items.map((item) => [
+    item.displayNo, item.caseNo, item.featureName, item.testType, item.scenario,
+    item.steps, item.testData ?? '', item.expectedResult, item.status,
+    item.picQaName ?? '', item.testDate ?? '', item.note ?? '',
+    item.devArea ?? '', item.captureUrl ?? '',
+  ]);
+  const ws = XLSX.utils.aoa_to_sheet([EXPECTED_HEADERS, ...rows]);
+  ws['!cols'] = EXPECTED_HEADERS.map((h) => ({ wch: Math.max(h.length + 4, 14) }));
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Test Case Export');
+  return XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }) as Buffer;
+}

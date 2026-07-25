@@ -82,6 +82,7 @@ export interface Bug {
     testCaseHeaderCode?: string;
     testCaseHeaderName?: string;
     reporterId: string;
+    sprint?: number | null;
     reporterName?: string;
     scenario: string;
     stepsToReproduce: string;

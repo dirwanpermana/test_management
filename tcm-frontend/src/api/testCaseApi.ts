@@ -1,5 +1,25 @@
 import { axiosClient } from './axiosClient';
 import type { TestCaseHeader, TestCaseItem } from '../types/entities';
+import { triggerBlobDownload, sanitizeFilenamePart, currentUserName, todayDateStr } from '../utils/downloadFile';
+
+// import { triggerBlobDownload, sanitizeFilenamePart, currentUserName, todayDateStr } from '../utils/downloadFile';
+
+export async function downloadTemplate(): Promise<void> {
+  const response = await axiosClient.get('/test-case-headers/template', { responseType: 'blob' });
+  triggerBlobDownload(response.data, 'Test_Case_Template.xlsx');
+}
+
+export async function downloadReport(): Promise<void> {
+  const response = await axiosClient.get('/test-case-headers/report', { responseType: 'blob' });
+  const filename = `Laporan Test Case - ${todayDateStr()} - ${sanitizeFilenamePart(currentUserName())}.xlsx`;
+  triggerBlobDownload(response.data, filename);
+}
+
+export async function exportItems(headerId: string, headerCode: string, namaTestCase: string): Promise<void> {
+  const response = await axiosClient.get(`/test-case-headers/${headerId}/items/export`, { responseType: 'blob' });
+  const filename = `${sanitizeFilenamePart(headerCode)} - ${sanitizeFilenamePart(namaTestCase)}.xlsx`;
+  triggerBlobDownload(response.data, filename);
+}
 
 export async function listHeaders(): Promise<TestCaseHeader[]> {
   const { data } = await axiosClient.get('/test-case-headers');
@@ -74,15 +94,39 @@ export async function importItems(headerId: string, file: File): Promise<ImportR
   return data;
 }
 
-// download template excel
-export async function downloadTemplate(): Promise<void> {
-  const response = await axiosClient.get('/test-case-headers/template', { responseType: 'blob' });
-  const url = window.URL.createObjectURL(new Blob([response.data]));
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = 'Test_Case_Template.xlsx';
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  window.URL.revokeObjectURL(url);
-}
+// // download template excel
+// export async function downloadTemplate(): Promise<void> {
+//   const response = await axiosClient.get('/test-case-headers/template', { responseType: 'blob' });
+//   const url = window.URL.createObjectURL(new Blob([response.data]));
+//   const link = document.createElement('a');
+//   link.href = url;
+//   link.download = 'Test_Case_Template.xlsx';
+//   document.body.appendChild(link);
+//   link.click();
+//   link.remove();
+//   window.URL.revokeObjectURL(url);
+// }
+// // download report
+// export async function downloadReport(): Promise<void> {
+//   const response = await axiosClient.get('/test-case-headers/report', { responseType: 'blob' });
+//   const url = window.URL.createObjectURL(new Blob([response.data]));
+//   const link = document.createElement('a');
+//   link.href = url;
+//   link.download = 'Laporan_Test_Case.xlsx';
+//   document.body.appendChild(link);
+//   link.click();
+//   link.remove();
+//   window.URL.revokeObjectURL(url);
+// }
+
+// export async function exportItems(headerId: string, headerCode: string): Promise<void> {
+//   const response = await axiosClient.get(`/test-case-headers/${headerId}/items/export`, { responseType: 'blob' });
+//   const url = window.URL.createObjectURL(new Blob([response.data]));
+//   const link = document.createElement('a');
+//   link.href = url;
+//   link.download = `TestCase_${headerCode}.xlsx`;
+//   document.body.appendChild(link);
+//   link.click();
+//   link.remove();
+//   window.URL.revokeObjectURL(url);
+// }

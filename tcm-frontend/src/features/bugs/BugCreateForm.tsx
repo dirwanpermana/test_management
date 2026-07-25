@@ -31,6 +31,7 @@ export function BugCreateForm({ onCreated }: { onCreated: () => void }) {
     })), [allItems, headerId]);
 
   const [testCaseNo, setTestCaseNo] = useState('');
+  const [sprint, setSprint] = useState<number | null>(null);
   const [scenario, setScenario] = useState('');
   const [stepsToReproduce, setStepsToReproduce] = useState('');
   const [expectedResult, setExpectedResult] = useState('');
@@ -56,6 +57,8 @@ export function BugCreateForm({ onCreated }: { onCreated: () => void }) {
       setScenario(item.scenario ?? '');
       setStepsToReproduce(item.steps ?? '');
       setExpectedResult(item.expectedResult ?? '');
+      const header = headers.find((h) => h.id === item.headerId);
+      setSprint(header?.sprint ?? null);
     }
   }
 
@@ -85,7 +88,7 @@ export function BugCreateForm({ onCreated }: { onCreated: () => void }) {
 
     setHeaderId(''); setTestCaseNo(''); setScenario(''); setStepsToReproduce('');
     setExpectedResult(''); setActualResult(''); setAssignedTo('');
-    setSeverity('Medium'); setPriority('Medium'); setStatus('Open'); setFile(null);
+    setSeverity('Medium'); setPriority('Medium'); setStatus('Open'); setFile(null); setSprint(null);
     onCreated();
   }
 
@@ -112,6 +115,10 @@ export function BugCreateForm({ onCreated }: { onCreated: () => void }) {
           onChange={handleCaseIdChange}
           placeholder={headerId ? 'Cari Case ID / scenario...' : 'Pilih ID Test Case dulu'}
         />
+      </div>
+      <div className="field">
+        <label>Sprint</label>
+        <input value={sprint ?? '-'} disabled />
       </div>
       <div className="field">
         <label>Nama Pembuat</label>

@@ -19,8 +19,7 @@ export function AppRoutes() {
           <Route path="/test-cases" element={<TestCaseListPage />} />
           <Route path="/test-cases/:headerId" element={<TestCaseItemsPage />} />
           <Route path="/bugs" element={<BugListPage />} />
-          <Route path="/bugs/:bugId" element={<BugDetailPage editable={false} />} />
-          <Route path="/bugs/:bugId/update" element={<BugDetailPage editable={true} />} />
+          <Route path="/bugs/:bugId" element={<BugDetailPage />} />
           <Route path="/monitoring" element={<MonitoringDashboardPage />} />
         </Route>
       </Route>
