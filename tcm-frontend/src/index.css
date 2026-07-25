@@ -67,6 +67,11 @@ textarea { min-height: 60px; font-family: inherit; }
 .hint-box {
   margin-top: 12px; background: #f3f4f6; border-radius: 8px; padding: 10px; font-size: 12px; color: #4b5563;
 }
+.ontest{
+  font-weight: bold;
+  font-size: large;
+  
+}
 
 /* ---- App shell ---- */
 .app-shell { display: flex; height: 100vh; }
@@ -315,3 +320,166 @@ textarea { min-height: 60px; font-family: inherit; }
 
 .field-label-hidden { visibility: hidden; }
 .toolbar { display: flex; align-items: center; gap: 16px; row-gap: 12px; margin-bottom: 12px; flex-wrap: wrap; }
+
+/* Notes */
+.notes-layout { height: calc(100vh - 160px); min-height: 420px; display: flex; gap: 20px; }
+
+.notes-sidebar {
+  width: 260px; flex-shrink: 0; display: flex; flex-direction: column; gap: 10px;
+  background: #fff; border-radius: var(--radius-lg); border: 1px solid #f1f5f9; padding: 14px;
+  box-shadow: var(--shadow-sm);
+}
+.notes-new-btn { width: 100%; }
+.notes-list { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; }
+.notes-list-item {
+  background: transparent; color: #374151; text-align: left; padding: 10px 12px;
+  border-radius: 8px; display: flex; flex-direction: column; gap: 2px; font-weight: 400;
+}
+.notes-list-item:hover:not(.active) { background: #f8fafc; }
+.notes-list-item.active { background: #eef2ff; color: #4338ca; }
+.notes-list-item-title { font-weight: 600; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.notes-list-item-meta { font-size: 11px; color: #9ca3af; }
+.notes-list-item.active .notes-list-item-meta { color: #6366f1; }
+
+.notes-editor {
+  flex: 1; min-height: 0; display: flex; flex-direction: column;
+  background: #fff; border-radius: var(--radius-lg); border: 1px solid #f1f5f9; padding: 24px 32px;
+  box-shadow: var(--shadow-sm); overflow-y: auto;
+}
+.notes-editor-header { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.notes-editor-actions { display: flex; gap: 8px; flex-shrink: 0; }
+.notes-title-input { border: none; font-size: 28px; font-weight: 700; padding: 4px 0; flex: 1; }
+.notes-title-input:focus { outline: none; }
+.notes-editor-meta { font-size: 12px; color: #9ca3af; margin: 4px 0 16px; }
+.notes-saving { color: #6366f1; font-weight: 600; }
+.notes-empty { flex: 1; display: flex; align-items: center; justify-content: center; color: #9ca3af; }
+
+/* ---- Toolbar ---- */
+.notes-toolbar {
+  display: flex; align-items: center; gap: 6px; margin-bottom: 14px; flex-wrap: wrap;
+  padding-bottom: 10px; border-bottom: 1px solid #f1f5f9;
+}
+.notes-toolbar-btn {
+  background: #f1f5f9; color: #334155; padding: 6px 12px; border-radius: 6px;
+  font-size: 13px; font-weight: 700; min-width: 32px;
+}
+.notes-toolbar-btn:hover:not(:disabled) { background: #e2e8f0; }
+.notes-toolbar-btn.active { background: var(--color-primary); color: #fff; }
+.notes-table-controls { display: flex; gap: 6px; margin-left: 10px; padding-left: 10px; border-left: 1px solid #e5e7eb; }
+
+/* ---- Editor WYSIWYG (TipTap / ProseMirror) ---- */
+.notes-editor-content { flex: 1; }
+.notes-print-title { display: none; }
+
+.ProseMirror { outline: none; font-size: 15px; line-height: 1.7; color: #1f2937; min-height: 300px; }
+.ProseMirror h2 { font-size: 22px; margin: 20px 0 8px; }
+.ProseMirror h3 { font-size: 18px; margin: 16px 0 6px; }
+.ProseMirror p { margin: 6px 0; }
+.ProseMirror ul, .ProseMirror ol { padding-left: 22px; }
+
+/* Checklist */
+.ProseMirror ul[data-type="taskList"] { list-style: none; padding-left: 4px; }
+.ProseMirror ul[data-type="taskList"] li { display: flex; align-items: flex-start; gap: 8px; }
+.ProseMirror ul[data-type="taskList"] li > label { margin-top: 4px; }
+.ProseMirror ul[data-type="taskList"] li > div { flex: 1; }
+
+/* Tabel */
+.ProseMirror table { border-collapse: collapse; width: 100%; margin: 12px 0; table-layout: fixed; }
+.ProseMirror th, .ProseMirror td {
+  border: 1px solid #e5e7eb; padding: 8px 10px; text-align: left; position: relative; vertical-align: top;
+}
+.ProseMirror th { background: #f8fafc; font-weight: 600; }
+.ProseMirror .selectedCell { background: #eef2ff; }
+
+/* Code block — tema gelap ala VSCode */
+/* .ProseMirror pre {
+  background: #1e1e1e; color: #d4d4d4; border-radius: 8px; padding: 14px 16px;
+  font-family: 'Courier New', monospace; font-size: 13px; overflow-x: auto; margin: 12px 0;
+}
+.ProseMirror pre code { background: none; padding: 0; }
+.ProseMirror code {
+  background: #f1f5f9; color: #db2777; padding: 2px 6px; border-radius: 4px;
+  font-family: 'Courier New', monospace; font-size: 13px;
+} */
+
+/* Warna token syntax highlight (highlight.js classnames dari lowlight),
+   dipilih agar terasa seperti tema VSCode Dark+. */
+/* .hljs-keyword, .hljs-selector-tag, .hljs-literal { color: #569cd6; }
+.hljs-string, .hljs-attr { color: #ce9178; }
+.hljs-comment { color: #6a9955; font-style: italic; }
+.hljs-number { color: #b5cea8; }
+.hljs-function, .hljs-title { color: #dcdcaa; }
+.hljs-variable, .hljs-name { color: #9cdcfe; }
+.hljs-type, .hljs-class { color: #4ec9b0; } */
+
+/* ---- Inline code (`teks` di tengah kalimat) — TERPISAH dari code block ---- */
+.ProseMirror code:not(pre code) {
+  background: #f1f5f9; color: #db2777; padding: 2px 6px; border-radius: 4px;
+  font-family: 'Cascadia Code', Consolas, 'Courier New', monospace; font-size: 13px;
+}
+
+/* ---- Code block ala VSCode (tampilan "jendela editor") ---- */
+.ProseMirror pre {
+  position: relative;
+  background: #1e1e1e;
+  border-radius: 8px;
+  padding: 32px 18px 16px;
+  margin: 14px 0;
+  overflow-x: auto;
+}
+/* Dekorasi titik ala terminal/macOS, biar terasa seperti jendela code editor */
+.ProseMirror pre::before {
+  content: '● ● ●';
+  position: absolute; top: 10px; left: 14px;
+  font-size: 10px; letter-spacing: 3px; color: #555;
+}
+.ProseMirror pre code {
+  display: block;
+  background: none;
+  padding: 0;
+  color: #d4d4d4;                 /* base color VSCode Dark+ — bukan pink lagi */
+  font-family: 'Cascadia Code', Consolas, 'Courier New', monospace;
+  font-size: 14.5px;
+  line-height: 1.65;
+  white-space: pre;
+  tab-size: 2;
+}
+
+/* Warna token (dari highlight.js/lowlight) — DISKOP ke dalam .ProseMirror pre
+   supaya tidak nabrak style lain, dan tidak lagi ke-override jadi merah. */
+.ProseMirror pre .hljs-keyword,
+.ProseMirror pre .hljs-selector-tag,
+.ProseMirror pre .hljs-literal,
+.ProseMirror pre .hljs-built_in { color: #569cd6; }
+.ProseMirror pre .hljs-string,
+.ProseMirror pre .hljs-attr,
+.ProseMirror pre .hljs-regexp { color: #ce9178; }
+.ProseMirror pre .hljs-comment,
+.ProseMirror pre .hljs-quote { color: #6a9955; font-style: italic; }
+.ProseMirror pre .hljs-number { color: #b5cea8; }
+.ProseMirror pre .hljs-function,
+.ProseMirror pre .hljs-title,
+.ProseMirror pre .hljs-title.function_ { color: #dcdcaa; }
+.ProseMirror pre .hljs-variable,
+.ProseMirror pre .hljs-name,
+.ProseMirror pre .hljs-params { color: #9cdcfe; }
+.ProseMirror pre .hljs-type,
+.ProseMirror pre .hljs-class,
+.ProseMirror pre .hljs-title.class_ { color: #4ec9b0; }
+.ProseMirror pre .hljs-tag,
+.ProseMirror pre .hljs-punctuation { color: #808080; }
+.ProseMirror pre .hljs-attribute { color: #9cdcfe; }
+
+/* ---- Print / Download PDF ---- */
+@media print {
+  .sidebar, .topbar, .notes-sidebar, .notes-editor-header, .notes-editor-meta,
+  .notes-toolbar, .page > h1 {
+    display: none !important;
+  }
+  .app-shell, .app-main, .app-content, .page, .notes-layout, .notes-editor {
+    display: block !important; height: auto !important; overflow: visible !important;
+    padding: 0 !important; margin: 0 !important; box-shadow: none !important; border: none !important;
+  }
+  .notes-print-title { display: block; font-size: 24px; font-weight: 700; margin-bottom: 12px; }
+}
+.notes-unsaved { color: #d97706; font-weight: 600; }

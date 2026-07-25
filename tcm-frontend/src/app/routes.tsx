@@ -8,6 +8,7 @@ import { BugListPage } from '../features/bugs/BugListPage';
 import { BugCreatePage } from '../features/bugs/BugCreatePage';
 import { BugDetailPage } from '../features/bugs/BugDetailPage';
 import { MonitoringDashboardPage } from '../features/monitoring/MonitoringDashboardPage';
+import { NotesPage } from '../features/notes/NotesPage';
 
 export function AppRoutes() {
   return (
@@ -23,6 +24,7 @@ export function AppRoutes() {
           <Route path="/bugs/new" element={<BugCreatePage />} />
           <Route path="/bugs/:bugId" element={<BugDetailPage />} />
           <Route path="/monitoring" element={<MonitoringDashboardPage />} />
+          <Route path="/notes" element={<NotesPage />} />
         </Route>
       </Route>
 

@@ -63,18 +63,18 @@ export function TestCaseListPage() {
 
   return (
     <div className="page">
-      <h1>Test Case</h1>
+      {/* <h1>Test Case</h1> */}
 
       <div className="card">
         <div className="toolbar">
           <select value={menuFilter} onChange={(e) => setMenuFilter(e.target.value)}>
-            <option value="">Semua Menu</option>
+            <option value="">All Menu</option>
             {menuOptions.map((m) => (
               <option key={m} value={m}>{m}</option>
             ))}
           </select>
           <select value={qaFilter} onChange={(e) => setQaFilter(e.target.value)}>
-            <option value="">Semua PIC QA</option>
+            <option value="">All PIC QA</option>
             {qaUsers.map((u) => (
               <option key={u.id} value={u.id}>{u.fullName}</option>
             ))}
@@ -86,7 +86,7 @@ export function TestCaseListPage() {
             </button>
           </RoleGuard>
           <button className="btn-secondary" onClick={() => downloadReport()}>
-            📊 Download Laporan
+            📊 Download Report
           </button>
           <input
             className="search-input toolbar-search"
@@ -97,7 +97,7 @@ export function TestCaseListPage() {
         </div>
 
         {isLoading ? (
-          <p>Memuat data...</p>
+          <p>Loading...</p>
         ) : (
           <>
             <table className="data-table">
@@ -144,7 +144,7 @@ export function TestCaseListPage() {
             {filteredHeaders.length > 0 && (
               <div className="pagination-bar">
                 <span className="pagination-info">
-                  Menampilkan {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, filteredHeaders.length)} dari {filteredHeaders.length} data
+                  Showing {(page - 1) * PAGE_SIZE + 1}-{Math.min(page * PAGE_SIZE, filteredHeaders.length)} of {filteredHeaders.length} data
                 </span>
                 <div className="pagination-controls">
                   <button
@@ -152,7 +152,7 @@ export function TestCaseListPage() {
                     onClick={() => setPage((p) => Math.max(1, p - 1))}
                     disabled={page <= 1}
                   >
-                    &larr; Sebelumnya
+                    Back
                   </button>
                   <span className="pagination-page">Halaman {page} / {totalPages}</span>
                   <button
@@ -160,7 +160,7 @@ export function TestCaseListPage() {
                     onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
                     disabled={page >= totalPages}
                   >
-                    Berikutnya &rarr;
+                    Next
                   </button>
                 </div>
               </div>

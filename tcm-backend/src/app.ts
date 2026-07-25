@@ -6,6 +6,7 @@ import { authRouter, usersRouter } from './routes/auth';
 import { testCaseRouter } from './routes/testCases';
 import { bugRouter } from './routes/bugs';
 import { monitoringRouter } from './routes/monitoring';
+import { noteRouter } from './routes/notes';
 
 export function createApp() {
   const app = express();
@@ -21,6 +22,7 @@ export function createApp() {
   app.use('/api', testCaseRouter);
   app.use('/api', bugRouter);
   app.use('/api', monitoringRouter);
+  app.use('/api', noteRouter);
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {

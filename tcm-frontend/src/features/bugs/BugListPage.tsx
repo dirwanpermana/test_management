@@ -86,19 +86,19 @@ export function BugListPage() {
       <div className="card">
         <div className="toolbar">
           <select value={testCaseFilter} onChange={(e) => setTestCaseFilter(e.target.value)}>
-            <option value="">Semua ID Test Case</option>
+            <option value="">All ID Test Case</option>
             {testCaseOptions.map((t) => <option key={t} value={t}>{t}</option>)}
           </select>
           <select value={reporterFilter} onChange={(e) => setReporterFilter(e.target.value)}>
-            <option value="">Semua Pembuat</option>
+            <option value="">All QA</option>
             {reporterOptions.map((r) => <option key={r} value={r}>{r}</option>)}
           </select>
           <select value={assignedToFilter} onChange={(e) => setAssignedToFilter(e.target.value)}>
-            <option value="">Semua Assign To</option>
+            <option value="">All Dev</option>
             {assignedToOptions.map((a) => <option key={a} value={a}>{a}</option>)}
           </select>
           <select value={sprintFilter} onChange={(e) => setSprintFilter(e.target.value)}>
-            <option value="">Semua Sprint</option>
+            <option value="">All Sprint</option>
             {sprintOptions.map((s) => <option key={s} value={s}>{s}</option>)}
           </select>
           <input
@@ -110,7 +110,7 @@ export function BugListPage() {
         </div>
 
         {isLoading ? (
-          <p>Memuat data...</p>
+          <p>Loading...</p>
         ) : (
           <>
             <table className="data-table">
@@ -156,15 +156,15 @@ export function BugListPage() {
             {filteredBugs.length > 0 && (
               <div className="pagination-bar">
                 <span className="pagination-info">
-                  Menampilkan {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, filteredBugs.length)} dari {filteredBugs.length} data
+                  Showing {(page - 1) * PAGE_SIZE + 1}-{Math.min(page * PAGE_SIZE, filteredBugs.length)} of {filteredBugs.length} data
                 </span>
                 <div className="pagination-controls">
                   <button className="btn-secondary" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page <= 1}>
-                    &larr; Sebelumnya
+                    Back
                   </button>
                   <span className="pagination-page">Halaman {page} / {totalPages}</span>
                   <button className="btn-secondary" onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={page >= totalPages}>
-                    Berikutnya &rarr;
+                    Next
                   </button>
                 </div>
               </div>

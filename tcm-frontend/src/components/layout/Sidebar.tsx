@@ -1,12 +1,19 @@
 import { NavLink } from 'react-router-dom';
+import { useAuth } from '../../auth/useAuth';
 
-const menus = [
+// const menus = [
+const baseMenus = [
   { to: '/test-cases', label: 'Test Case', icon: '📋' },
   { to: '/bugs', label: 'List Bug', icon: '🐞' },
   { to: '/monitoring', label: 'Monitoring', icon: '📊' },
 ];
 
 export function Sidebar({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => void }) {
+  const { user } = useAuth();
+   const menus = user?.role === 'QA'
+     ? [...baseMenus, { to: '/notes', label: 'Notes', icon: '📝' }]
+     : baseMenus;
+
   return (
     <aside className={`sidebar${collapsed ? ' sidebar-collapsed' : ''}`}>
       <div className="sidebar-topbar">

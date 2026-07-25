@@ -138,3 +138,15 @@ export interface BugMonitoring {
   assignedToName: string | null;
   totalBug: number;
 }
+
+export interface Note {
+  id: string;
+  title: string;
+  content: string;
+  createdBy: string;
+  createdByName?: string;
+  updatedBy?: string;
+  updatedByName?: string;
+  createdAt: string;
+  updatedAt: string;
+} 

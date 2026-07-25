@@ -27,8 +27,8 @@ export function LoginPage() {
   return (
     <div className="login-page">
       <form className="login-card" onSubmit={handleSubmit}>
-        <h1>Test Case Management</h1>
-        <p className="subtitle">Masuk untuk melanjutkan</p>
+        <h1>Tes Case Management Tools</h1>
+        <p className="subtitle">Silakan Login <span className="ontest">Ontest</span></p>
 
         <label>Username</label>
         <input value={username} onChange={(e) => setUsername(e.target.value)} required />
@@ -41,12 +41,6 @@ export function LoginPage() {
         <button type="submit" disabled={submitting}>
           {submitting ? 'Memproses...' : 'Login'}
         </button>
-
-        <div className="hint-box">
-          <strong>Akun mock (password sama: password123)</strong>
-          <div>QA: qa1, qa2</div>
-          <div>Developer: dev1, dev2</div>
-        </div>
       </form>
     </div>
   );

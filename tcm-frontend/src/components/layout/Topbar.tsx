@@ -5,6 +5,7 @@ const PAGE_TITLES: Record<string, string> = {
   '/test-cases': 'Test Case',
   '/bugs': 'List Bug',
   '/monitoring': 'Monitoring',
+  '/notes': 'Notes',
 };
 
 export function Topbar() {
