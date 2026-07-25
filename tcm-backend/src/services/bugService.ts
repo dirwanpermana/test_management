@@ -1,20 +1,22 @@
 import { pool } from '../db/pool';
 
 const BUG_SELECT = `
-  SELECT
-    b.id, b.bug_no AS "bugNo", b.test_case_item_id AS "testCaseItemId",
-    tci.case_no AS "testCaseNo",
-    b.reporter_id AS "reporterId", reporter.full_name AS "reporterName",
-    b.scenario, b.steps_to_reproduce AS "stepsToReproduce",
-    b.expected_result AS "expectedResult", b.actual_result AS "actualResult",
-    b.status, b.severity, b.priority,
-    b.assigned_to AS "assignedTo", assignee.full_name AS "assignedToName",
-    b.created_at AS "createdAt", b.updated_at AS "updatedAt"
-  FROM bugs b
-  LEFT JOIN test_case_items tci ON tci.id = b.test_case_item_id
-  LEFT JOIN users reporter ON reporter.id = b.reporter_id
-  LEFT JOIN users assignee ON assignee.id = b.assigned_to
-`;
+    SELECT
+      b.id, b.bug_no AS "bugNo", b.test_case_item_id AS "testCaseItemId",
+      tci.case_no AS "testCaseNo",
++     tch.header_code AS "testCaseHeaderCode", tch.nama_test_case AS "testCaseHeaderName",
+      b.reporter_id AS "reporterId", reporter.full_name AS "reporterName",
+      b.scenario, b.steps_to_reproduce AS "stepsToReproduce",
+      b.expected_result AS "expectedResult", b.actual_result AS "actualResult",
+      b.status, b.severity, b.priority,
+      b.assigned_to AS "assignedTo", assignee.full_name AS "assignedToName",
+      b.created_at AS "createdAt", b.updated_at AS "updatedAt"
+    FROM bugs b
+    LEFT JOIN test_case_items tci ON tci.id = b.test_case_item_id
++   LEFT JOIN test_case_headers tch ON tch.id = tci.header_id
+    LEFT JOIN users reporter ON reporter.id = b.reporter_id
+    LEFT JOIN users assignee ON assignee.id = b.assigned_to
+  `;
 
 interface AttachmentRow { id: string; bugId: string; fileUrl: string; fileName: string }
 
@@ -99,7 +101,7 @@ export async function getHistory(bugId: string) {
 export async function createBug(input: {
   testCaseNo?: string; reporterId: string; scenario: string; stepsToReproduce: string;
   expectedResult: string; actualResult: string; assignedTo?: string;
-  severity: string; priority: string;
+  severity: string; priority: string; status?: string;
 }) {
   let testCaseItemId: string | null = null;
   if (input.testCaseNo) {
@@ -108,14 +110,13 @@ export async function createBug(input: {
   }
 
   const { rows } = await pool.query(
-    `INSERT INTO bugs (test_case_item_id, reporter_id, scenario, steps_to_reproduce,
-                        expected_result, actual_result, assigned_to, severity, priority)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+    `INSERT INTO bugs (test_case_item_id, reporter_id, scenario, steps_to_reproduce, expected_result, actual_result, assigned_to, severity, priority, status)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,COALESCE($10,'Open'))
      RETURNING id`,
     [
       testCaseItemId, input.reporterId, input.scenario, input.stepsToReproduce,
       input.expectedResult, input.actualResult, input.assignedTo ?? null,
-      input.severity, input.priority,
+      input.severity, input.priority, input.status ?? null,
     ],
   );
   return getBugById(rows[0].id);
@@ -124,7 +125,7 @@ export async function createBug(input: {
 // DEV hanya boleh mengubah status bug ke dua nilai ini. QA boleh mengubah ke status manapun.
 // Ini menggantikan pengecekan berbasis tabel bug_status_transitions (from->to->role) yang lama —
 // aturan sekarang murni berbasis role tujuan, tidak bergantung status asal.
-const DEV_ALLOWED_STATUSES = new Set(['Ready to Test', 'On Progress Dev']);
+const DEV_ALLOWED_STATUSES = new Set(['Open', 'Ready to Test', 'On Progress Dev']);
 
 export function isTransitionAllowed(_fromStatus: string, toStatus: string, role: string): boolean {
   if (role === 'QA') return true;

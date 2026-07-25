@@ -35,7 +35,7 @@ CREATE TABLE IF NOT EXISTS test_case_headers (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     header_code     CHAR(6) NOT NULL,
     nama_test_case  VARCHAR(255) NOT NULL,
-    sprint          VARCHAR(50),
+    sprint          INTEGER,
     jira_url        VARCHAR(500),
     nama_menu       VARCHAR(255) NOT NULL,
     created_by      UUID NOT NULL REFERENCES users(id),

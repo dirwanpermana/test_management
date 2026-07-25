@@ -17,7 +17,7 @@ export interface TestCaseHeader {
   id: string;
   headerCode: string;
   namaTestCase: string;
-  sprint?: string;
+  sprint?: number | null;
   jiraUrl: string;
   namaMenu: string;
   createdBy: string;
@@ -75,25 +75,27 @@ export interface Attachment {
 }
 
 export interface Bug {
-  id: string;
-  bugNo: string; // 'BUG-260722-01'
-  testCaseItemId?: string;
-  testCaseNo?: string;
-  reporterId: string;
-  reporterName?: string;
-  scenario: string;
-  stepsToReproduce: string;
-  expectedResult: string;
-  actualResult: string;
-  status: BugStatus;
-  severity: Severity;
-  priority: Priority;
-  assignedTo?: string;
-  assignedToName?: string;
-  attachments: Attachment[];
-  createdAt: string;
-  updatedAt: string;
-}
+    id: string;
+    bugNo: string;
+    testCaseItemId?: string;
+    testCaseNo?: string;
+    testCaseHeaderCode?: string;
+    testCaseHeaderName?: string;
+    reporterId: string;
+    reporterName?: string;
+    scenario: string;
+    stepsToReproduce: string;
+    expectedResult: string;
+    actualResult: string;
+    status: BugStatus;
+    severity: Severity;
+    priority: Priority;
+    assignedTo?: string;
+    assignedToName?: string;
+    attachments: Attachment[];
+    createdAt: string;
+    updatedAt: string;
+  }
 
 export interface BugComment {
   id: string;

@@ -7,7 +7,8 @@ export async function listHeaders(): Promise<TestCaseHeader[]> {
 }
 
 export async function createHeader(payload: {
-  namaTestCase: string; sprint?: string; jiraUrl: string; namaMenu: string;
+  // namaTestCase: string; sprint?: string; jiraUrl: string; namaMenu: string;
+  namaTestCase: string; sprint?: number | null; jiraUrl: string; namaMenu: string;
 }): Promise<TestCaseHeader> {
   const { data } = await axiosClient.post('/test-case-headers', payload);
   return data;
@@ -37,7 +38,8 @@ export async function deleteItem(id: string): Promise<void> {
 }
 
 export async function updateHeader(id: string, payload: Partial<{
-  namaTestCase: string; sprint: string; jiraUrl: string; namaMenu: string;
+  // namaTestCase: string; sprint: string; jiraUrl: string; namaMenu: string;
+  namaTestCase: string; sprint: number | null; jiraUrl: string; namaMenu: string;
 }>): Promise<TestCaseHeader> {
   const { data } = await axiosClient.patch(`/test-case-headers/${id}`, payload);
   return data;

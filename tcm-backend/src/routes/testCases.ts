@@ -12,7 +12,8 @@ testCaseRouter.use(authenticate);
 
 const headerSchema = z.object({
   namaTestCase: z.string().min(1),
-  sprint: z.string().optional(),
+  // sprint: z.string().optional(),
+  sprint: z.coerce.number().int().positive().nullish(),
   jiraUrl: z.string().url().optional().or(z.literal('')),
   namaMenu: z.string().min(1),
 });
@@ -88,6 +89,40 @@ testCaseRouter.post('/test-case-headers/:headerId/items', requireRole('QA'), asy
   });
   return res.status(201).json(item);
 }));
+
+
+testCaseRouter.post(
+  '/test-case-headers/:headerId/items/import',
+  requireRole('QA'),
+  upload.single('file'),
+  asyncHandler(async (req, res) => {
+    const headerId = paramStr(req.params.headerId);
+    const header = await service.findHeaderById(headerId);
+    if (!header) {
+      if (req.file) fs.unlink(req.file.path, () => {});
+      return res.status(404).json({ message: 'Header tidak ditemukan' });
+    }
+    if (!req.file) {
+      return res.status(400).json({ message: 'File Excel tidak ditemukan (field name harus "file")' });
+    }
+    try {
+      const result = await service.importItemsFromExcel(headerId, req.file.path, req.auth!.sub);
+      return res.status(201).json(result);
+    } catch (err) {
+      if (err instanceof service.TemplateValidationError) {
+        return res.status(400).json({
+          message: 'Format file Excel tidak sesuai template',
+          missing: err.missing,
+          unexpected: err.unexpected,
+        });
+      }
+      throw err;
+    } finally {
+      fs.unlink(req.file.path, () => {});
+    }
+  }),
+);
+
 
 const bulkUpdateSchema = z.object({
   items: z.array(z.object({

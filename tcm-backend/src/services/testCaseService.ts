@@ -21,7 +21,8 @@ export async function listHeaders() {
 }
 
 export async function createHeader(input: {
-  namaTestCase: string; sprint?: string; jiraUrl?: string; namaMenu: string; createdBy: string;
+  // namaTestCase: string; sprint?: string; jiraUrl?: string; namaMenu: string; createdBy: string;
+  namaTestCase: string; sprint?: number | null; jiraUrl?: string; namaMenu: string; createdBy: string;
 }) {
   const { rows } = await pool.query(
     `INSERT INTO test_case_headers (nama_test_case, sprint, jira_url, nama_menu, created_by)
@@ -34,7 +35,8 @@ export async function createHeader(input: {
 }
 
 export async function updateHeader(id: string, input: Partial<{
-  namaTestCase: string; sprint: string; jiraUrl: string; namaMenu: string;
+  // namaTestCase: string; sprint: string; jiraUrl: string; namaMenu: string;
+  namaTestCase: string; sprint: number | null; jiraUrl: string; namaMenu: string;
 }>) {
   const fieldMap: Record<string, string> = {
     namaTestCase: 'nama_test_case', sprint: 'sprint', jiraUrl: 'jira_url', namaMenu: 'nama_menu',
@@ -382,15 +384,25 @@ function validateTemplateHeaders(sheet: XLSX.WorkSheet): { missing: string[]; un
 }
 
 
-export async function importItemsFromExcel(
-  headerId: string,
-  filePath: string,
-  importedBy: string,
-): Promise<{ inserted: number; skipped: ImportRowError[] }> {
-  const workbook = XLSX.readFile(filePath);
-  const sheetName = workbook.SheetNames[0];
-  const sheet = workbook.Sheets[sheetName];
-  const rows: Record<string, unknown>[] = XLSX.utils.sheet_to_json(sheet, { defval: '' });
+// export async function importItemsFromExcel(
+//   headerId: string,
+//   filePath: string,
+//   importedBy: string,
+// ): Promise<{ inserted: number; skipped: ImportRowError[] }> {
+//   const workbook = XLSX.readFile(filePath);
+//   const sheetName = workbook.SheetNames[0];
+//   const sheet = workbook.Sheets[sheetName];
+//   const rows: Record<string, unknown>[] = XLSX.utils.sheet_to_json(sheet, { defval: '' });
+
+    export async function importItemsFromExcel(
+    headerId: string,
+    filePath: string,
+    importedBy: string,
+  ): Promise<{ inserted: number; skipped: ImportRowError[] }> {
+    const workbook = XLSX.readFile(filePath);
+    const sheetName = workbook.SheetNames[0];
+    const sheet = workbook.Sheets[sheetName];
+    const rows: Record<string, unknown>[] = XLSX.utils.sheet_to_json(sheet, { defval: '' });
 
   // Ambil sekali di awal (bukan query per baris) — cukup efisien untuk
   // jumlah baris test case yang wajar per header.

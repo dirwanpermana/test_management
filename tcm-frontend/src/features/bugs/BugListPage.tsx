@@ -1,14 +1,14 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { RoleGuard } from '../../auth/RoleGuard';
 import { StatusBadge } from '../../components/ui/StatusBadge';
 import { BugCreateForm } from './BugCreateForm';
-import { BugDetailDrawer } from './BugDetailDrawer';
 import { useBugs } from './useBugs';
 
 export function BugListPage() {
+  const navigate = useNavigate();
   const { data: bugs = [], isLoading } = useBugs();
   const [showForm, setShowForm] = useState(false);
-  const [activeBugId, setActiveBugId] = useState<string | null>(null);
 
   return (
     <div className="page">
@@ -52,7 +52,10 @@ export function BugListPage() {
                   <td><StatusBadge status={b.status} /></td>
                   <td>{b.assignedToName ?? '-'}</td>
                   <td>{new Date(b.createdAt).toLocaleString('id-ID')}</td>
-                  <td><button className="btn-link" onClick={() => setActiveBugId(b.id)}>Detail</button></td>
+                  <td className="action-cell">
+                    <button className="btn-link" onClick={() => navigate(`/bugs/${b.id}`)}>Detail</button>
+                    <button className="btn-link" onClick={() => navigate(`/bugs/${b.id}/update`)}>Update</button>
+                  </td>
                 </tr>
               ))}
               {bugs.length === 0 && (
@@ -62,10 +65,6 @@ export function BugListPage() {
           </table>
         )}
       </div>
-
-      {activeBugId && (
-        <BugDetailDrawer bugId={activeBugId} onClose={() => setActiveBugId(null)} />
-      )}
     </div>
   );
 }

@@ -5,6 +5,7 @@ import { LoginPage } from '../features/auth/LoginPage';
 import { TestCaseListPage } from '../features/test-cases/TestCaseListPage';
 import { TestCaseItemsPage } from '../features/test-cases/TestCaseItemsPage';
 import { BugListPage } from '../features/bugs/BugListPage';
+import { BugDetailPage } from '../features/bugs/BugDetailPage';
 import { MonitoringDashboardPage } from '../features/monitoring/MonitoringDashboardPage';
 
 export function AppRoutes() {
@@ -18,6 +19,8 @@ export function AppRoutes() {
           <Route path="/test-cases" element={<TestCaseListPage />} />
           <Route path="/test-cases/:headerId" element={<TestCaseItemsPage />} />
           <Route path="/bugs" element={<BugListPage />} />
+          <Route path="/bugs/:bugId" element={<BugDetailPage editable={false} />} />
+          <Route path="/bugs/:bugId/update" element={<BugDetailPage editable={true} />} />
           <Route path="/monitoring" element={<MonitoringDashboardPage />} />
         </Route>
       </Route>

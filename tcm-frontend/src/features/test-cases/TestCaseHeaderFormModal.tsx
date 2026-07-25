@@ -12,6 +12,7 @@ export function TestCaseHeaderFormModal({ onClose, onCreated }: Props) {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [namaTestCase, setNamaTestCase] = useState('');
+  // const [sprint, setSprint] = useState('');
   const [sprint, setSprint] = useState('');
   const [namaMenu, setNamaMenu] = useState('');
   const [jiraUrl, setJiraUrl] = useState('');
@@ -26,7 +27,13 @@ export function TestCaseHeaderFormModal({ onClose, onCreated }: Props) {
     setError(null);
     setImportSummary(null);
     try {
-      const header = await createHeader.mutateAsync({ namaTestCase, sprint, namaMenu, jiraUrl });
+      const header = await createHeader.mutateAsync({ 
+        // namaTestCase, sprint, namaMenu, jiraUrl 
+        namaTestCase,
+        sprint: sprint.trim() === '' ? null : Number(sprint),
+        namaMenu,
+        jiraUrl,
+      });
 
       if (file) {
         try {
@@ -44,8 +51,16 @@ export function TestCaseHeaderFormModal({ onClose, onCreated }: Props) {
             setTimeout(() => onCreated(header.id), 2500);
             return;
           }
-        } catch {
-          setError('Test case berhasil dibuat, tapi import Excel gagal. Silakan isi manual atau coba import ulang dari halaman detail.');
+        } catch (err) {
+          const data = (err as { response?: { data?: { message?: string; missing?: string[]; unexpected?: string[] } } }).response?.data;
+          if (data?.missing?.length) {
+            setError(
+              `Test case berhasil dibuat, tapi format Excel tidak sesuai template — kolom hilang: ${data.missing.join(', ')}. `
+              + `Silakan isi manual, atau perbaiki file lalu import lagi lewat tombol "Import Excel" di halaman detail.`,
+            );
+          } else {
+            setError('Test case berhasil dibuat, tapi import Excel gagal. Silakan isi manual atau coba import ulang dari halaman detail.');
+          }
           onCreated(header.id);
           return;
         }
@@ -53,7 +68,7 @@ export function TestCaseHeaderFormModal({ onClose, onCreated }: Props) {
 
       onCreated(header.id);
     } catch {
-      setError('Gagal menyimpan test case, Format URL jira tidak sesuai');
+      setError('Gagal menyimpan test case. Coba lagi.');
     }
   }
 
@@ -77,7 +92,8 @@ export function TestCaseHeaderFormModal({ onClose, onCreated }: Props) {
         </div>
         <div className="field">
           <label>Sprint</label>
-          <input value={sprint} onChange={(e) => setSprint(e.target.value)} placeholder="Sprint 12" />
+          {/* <input value={sprint} onChange={(e) => setSprint(e.target.value)} placeholder="Sprint 12" /> */}
+        <input type="number" min={1} step={1} value={sprint} onChange={(e) => setSprint(e.target.value)} placeholder="Sprint 23"/>
         </div>
         <div className="field">
           <label>Nama Menu</label>

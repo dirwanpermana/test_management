@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useUpdateHeader } from './useTestCases';
 import type { TestCaseHeader } from '../../types/entities';
 
-function useAutosave(value: string, original: string, delay: number, save: (v: string) => void) {
+function useAutosave<T>(value: T, original: T, delay: number, save: (v: T) => void) {
   useEffect(() => {
     if (value === original) return;
     const handle = setTimeout(() => save(value), delay);
@@ -14,23 +14,28 @@ function useAutosave(value: string, original: string, delay: number, save: (v: s
 export function TestCaseHeaderEditableCard({ header, readOnly }: { header: TestCaseHeader; readOnly: boolean }) {
   const updateHeader = useUpdateHeader();
   const [namaTestCase, setNamaTestCase] = useState(header.namaTestCase);
-  const [sprint, setSprint] = useState(header.sprint ?? '');
+  // Sprint tetap dipegang sebagai string di komponen (biar field kosong bisa
+  // diketik ulang tanpa "0" nyangkut), dikonversi ke number/null cuma saat
+  // dikirim ke backend.
+  const [sprint, setSprint] = useState(header.sprint != null ? String(header.sprint) : '');
   const [namaMenu, setNamaMenu] = useState(header.namaMenu);
   const [jiraUrl, setJiraUrl] = useState(header.jiraUrl ?? '');
 
   useEffect(() => {
     setNamaTestCase(header.namaTestCase);
-    setSprint(header.sprint ?? '');
+    setSprint(header.sprint != null ? String(header.sprint) : '');
     setNamaMenu(header.namaMenu);
     setJiraUrl(header.jiraUrl ?? '');
   }, [header.id]);
 
-  function save(field: string, value: string) {
+  function save(field: string, value: unknown) {
     updateHeader.mutate({ id: header.id, payload: { [field]: value } });
   }
 
   useAutosave(namaTestCase, header.namaTestCase, 600, (v) => save('namaTestCase', v));
-  useAutosave(sprint, header.sprint ?? '', 600, (v) => save('sprint', v));
+  useAutosave(sprint, header.sprint != null ? String(header.sprint) : '', 600, (v) => {
+    save('sprint', v.trim() === '' ? null : Number(v));
+  });
   useAutosave(namaMenu, header.namaMenu, 600, (v) => save('namaMenu', v));
   useAutosave(jiraUrl, header.jiraUrl ?? '', 600, (v) => save('jiraUrl', v));
 
@@ -46,7 +51,15 @@ export function TestCaseHeaderEditableCard({ header, readOnly }: { header: TestC
       <div className="header-edit-grid">
         <div className="header-edit-field">
           <label>Sprint</label>
-          <input value={sprint} disabled={readOnly} onChange={(e) => setSprint(e.target.value)} placeholder="Sprint 12" />
+          <input
+            type="number"
+            min={1}
+            step={1}
+            value={sprint}
+            disabled={readOnly}
+            onChange={(e) => setSprint(e.target.value)}
+            placeholder="Contoh: 23"
+          />
         </div>
         <div className="header-edit-field">
           <label>Nama Menu</label>

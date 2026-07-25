@@ -34,6 +34,10 @@ const createBugSchema = z.object({
   assignedTo: z.string().uuid().optional(),
   severity: z.enum(['Critical', 'Major', 'Medium', 'Low']).default('Medium'),
   priority: z.enum(['Critical', 'High', 'Medium', 'Low']).default('Medium'),
+  status: z.enum([
+     'Open', 'On Progress Dev', 'Ready to Test', 'On Progress QA',
+     'Reopen', 'Close', 'Take Out', 'Hold',
+   ]).optional(),
 });
 
 bugRouter.post('/bugs', requireRole('QA'), asyncHandler(async (req, res) => {

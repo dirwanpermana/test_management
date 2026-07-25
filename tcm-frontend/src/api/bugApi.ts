@@ -16,7 +16,7 @@ export async function getBugDetail(id: string): Promise<{ bug: Bug; comments: Bu
 export async function createBug(payload: {
   testCaseNo?: string; scenario: string; stepsToReproduce: string;
   expectedResult: string; actualResult: string; assignedTo?: string;
-  severity: Severity; priority: Priority;
+  severity: Severity; priority: Priority; status?: BugStatus;
 }): Promise<Bug> {
   const { data } = await axiosClient.post('/bugs', payload);
   return data;

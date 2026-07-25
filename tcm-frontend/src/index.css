@@ -207,3 +207,23 @@ textarea { min-height: 60px; font-family: inherit; }
 .case-id-cell:hover { color: #2563eb; }
 .case-id-copy-icon { font-size: 12px; opacity: 0.55; }
 .case-id-cell.copied .case-id-copy-icon { opacity: 1; color: #16a34a; }
+
+.pagination-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 16px;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.pagination-info { color: #6b7280; font-size: 13px; }
+.pagination-controls { display: flex; align-items: center; gap: 10px; }
+.pagination-page { font-size: 13px; color: #374151; white-space: nowrap; }
+
+.bug-detail-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 20px; flex-wrap: wrap; gap: 12px; }
+.bug-detail-badges { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
+.bug-summary-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; margin-bottom: 20px; }
+.bug-summary-item { background: #f9fafb; border-radius: 10px; padding: 12px 16px; }
+.bug-summary-item .label { font-size: 12px; color: #6b7280; font-weight: 600; text-transform: uppercase; letter-spacing: .03em; margin-bottom: 4px; }
+.bug-summary-item .value { font-size: 15px; color: #111827; font-weight: 500; }
+.bug-section-card { margin-bottom: 20px; }
