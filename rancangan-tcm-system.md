@@ -2,7 +2,7 @@
 # Rancangan Sistem Test Case Management (TestRail-like)
 
 Versi: 0.1 (Design Draft) — 22 Jul 2026
-Stack: PostgreSQL, PHP (Laravel, recommended) untuk backend REST API, React + TypeScript untuk frontend.
+Stack: PostgreSQL, React + TypeScript untuk frontend.
 
 ---
 

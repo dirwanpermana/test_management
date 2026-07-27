@@ -20,7 +20,7 @@ export function Sidebar({ collapsed, onToggle }: { collapsed: boolean; onToggle:
         <button className="burger-btn" onClick={onToggle} aria-label="Toggle sidebar" type="button">
           <span /><span /><span />
         </button>
-        {!collapsed && <div className="sidebar-logo">OnTes</div>}
+        {!collapsed && <div className="sidebar-logo">OnTest</div>}
       </div>
       <nav>
         {menus.map((m) => (
